@@ -1,0 +1,259 @@
+<Window x:Class="UiInspector.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:UiInspector.App"
+        Title="UI Inspector"
+        Width="1100" Height="720" MinWidth="720" MinHeight="420"
+        Background="White"
+        FontFamily="Segoe UI" FontSize="13"
+        AutomationProperties.AutomationId="UiInspectorMainWindow">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+
+        <Style x:Key="ToolButton" TargetType="ButtonBase">
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Margin" Value="0,0,6,0"/>
+            <Setter Property="MinHeight" Value="30"/>
+        </Style>
+
+        <Style x:Key="TreeItemStyle" TargetType="TreeViewItem">
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+            <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/>
+            <Setter Property="Padding" Value="1,1"/>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- Toolbar -->
+        <Border DockPanel.Dock="Top" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="0,0,0,1" Padding="10,8">
+            <WrapPanel VerticalAlignment="Center">
+                <ToggleButton Style="{StaticResource ToolButton}" IsChecked="{Binding LivePickEnabled}"
+                              AutomationProperties.AutomationId="LivePickToggle"
+                              ToolTip="Hold Ctrl and hover over any app; release Ctrl to pick. Toggle: Ctrl+Shift+F12">
+                    <TextBlock><Run FontWeight="SemiBold" Text="Live pick"/><Run Foreground="{StaticResource MutedBrush}" Text="  (hold Ctrl)"/></TextBlock>
+                </ToggleButton>
+                <Button Style="{StaticResource ToolButton}" Command="{Binding InspectFocusedCommand}"
+                        AutomationProperties.AutomationId="InspectFocusedButton"
+                        Content="Focused element" ToolTip="Inspect the element with keyboard focus. Works from any app: Ctrl+Shift+F10"/>
+                <Button Style="{StaticResource ToolButton}" Command="{Binding DelayedCaptureCommand}"
+                        AutomationProperties.AutomationId="DelayedCaptureButton"
+                        Content="{Binding DelayedCaptureText}"
+                        ToolTip="For menus and tooltips: click, open the menu in the target app, keep the cursor on the item. Hotkey: Ctrl+Shift+F11"/>
+                <Button Style="{StaticResource ToolButton}" Command="{Binding BrowseWindowsCommand}"
+                        AutomationProperties.AutomationId="BrowseWindowsButton"
+                        Content="Browse windows" ToolTip="List every top-level window and pick from the tree: for hidden, covered or off-screen elements"/>
+                <Separator Margin="4,2,10,2"/>
+                <CheckBox VerticalAlignment="Center" Margin="0,0,14,0" IsChecked="{Binding SmartTargetEnabled}"
+                          AutomationProperties.AutomationId="SmartTargetCheckBox"
+                          Content="Smart target" ToolTip="When you point at a label or icon inside a control, select the control (button, link, list item…) instead"/>
+                <CheckBox VerticalAlignment="Center" Margin="0,0,14,0" IsChecked="{Binding HighlightEnabled}"
+                          AutomationProperties.AutomationId="HighlightCheckBox"
+                          Content="Highlight on screen"/>
+                <Button Style="{StaticResource ToolButton}" Command="{Binding CopyDetailsCommand}"
+                        AutomationProperties.AutomationId="CopyDetailsButton"
+                        Content="Copy details"/>
+            </WrapPanel>
+        </Border>
+
+        <!-- Status bar -->
+        <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="0,1,0,0" Padding="10,5" Background="#F9FAFB">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}"
+                           Text="Ctrl+Shift+F9 pick under cursor · F10 focused · F11 delayed · F12 live pick on/off"/>
+                <TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis" Margin="0,0,16,0"
+                           AutomationProperties.AutomationId="StatusText"/>
+            </DockPanel>
+        </Border>
+
+        <!-- Banner (smart target / web content hints) -->
+        <Border DockPanel.Dock="Top" Padding="12,8" Visibility="{Binding HasBanner, Converter={StaticResource BoolToVisibility}}">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Background" Value="{StaticResource InfoBackBrush}"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding BannerIsWarning}" Value="True">
+                            <Setter Property="Background" Value="{StaticResource WarningBackBrush}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Padding="8,3" Margin="12,0,0,0" VerticalAlignment="Center"
+                        Command="{Binding SelectPickedElementCommand}"
+                        Visibility="{Binding CanSelectPickedElement, Converter={StaticResource BoolToVisibility}}"
+                        AutomationProperties.AutomationId="SelectPickedElementButton"
+                        Content="Select what I pointed at"/>
+                <TextBlock Text="{Binding BannerText}" TextWrapping="Wrap" VerticalAlignment="Center"
+                           AutomationProperties.AutomationId="BannerText"/>
+            </DockPanel>
+        </Border>
+
+        <!-- Main area -->
+        <Grid Margin="10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="5*" MinWidth="260"/>
+                <ColumnDefinition Width="6"/>
+                <ColumnDefinition Width="4*" MinWidth="300"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Element tree -->
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Text="Element tree" FontWeight="SemiBold" Margin="2,0,0,6"/>
+                <TreeView x:Name="ElementTree" ItemsSource="{Binding RootNodes}"
+                          ItemContainerStyle="{StaticResource TreeItemStyle}"
+                          BorderBrush="{StaticResource PanelBorderBrush}"
+                          SelectedItemChanged="ElementTree_SelectedItemChanged"
+                          TreeViewItem.Selected="ElementTree_ItemSelected"
+                          VirtualizingPanel.IsVirtualizing="True"
+                          AutomationProperties.AutomationId="ElementTree">
+                    <TreeView.ItemTemplate>
+                        <HierarchicalDataTemplate DataType="{x:Type local:TreeNodeViewModel}" ItemsSource="{Binding Children}">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="▶ " Foreground="#DC2626"
+                                           Visibility="{Binding IsHitElement, Converter={StaticResource BoolToVisibility}}"/>
+                                <TextBlock Text="{Binding TypeText}" Foreground="{StaticResource TypeBrush}">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsOnPath}" Value="True">
+                                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock Text="{Binding NameText}" Margin="5,0,0,0">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                                                    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                    <Setter Property="FontStyle" Value="Italic"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                                <TextBlock Text="{Binding IdText}" Foreground="{StaticResource IdBrush}" Margin="6,0,0,0"/>
+                                <TextBlock Text="{Binding ClassText}" Foreground="{StaticResource MutedBrush}" Margin="6,0,0,0"/>
+                            </StackPanel>
+                        </HierarchicalDataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+            <!-- Details -->
+            <DockPanel Grid.Column="2">
+                <StackPanel DockPanel.Dock="Top" Margin="2,0,0,8">
+                    <TextBlock Text="{Binding DetailTitle}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
+                               AutomationProperties.AutomationId="DetailTitle"/>
+                    <TextBlock Text="{Binding DetailSubtitle}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,0">
+                        <TextBlock.Style>
+                            <Style TargetType="TextBlock">
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsPreview}" Value="True">
+                                        <Setter Property="Foreground" Value="#B45309"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </TextBlock.Style>
+                    </TextBlock>
+                </StackPanel>
+
+                <TabControl AutomationProperties.AutomationId="DetailTabs">
+                <TabItem Header="Properties" AutomationProperties.AutomationId="PropertiesTab">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl ItemsSource="{Binding Properties}" Margin="8,6" AutomationProperties.AutomationId="PropertiesList">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate DataType="{x:Type local:PropertyRow}">
+                                    <Grid Margin="0,3">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="140"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource MutedBrush}"/>
+                                        <!-- Read-only TextBox so values can be selected and copied. -->
+                                        <TextBox Grid.Column="1" Text="{Binding Value, Mode=OneWay}" IsReadOnly="True"
+                                                 BorderThickness="0" Background="Transparent" Padding="0"
+                                                 TextWrapping="Wrap" AutomationProperties.Name="{Binding Name}"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </TabItem>
+
+                <TabItem Header="Selector &amp; code" AutomationProperties.AutomationId="SelectorTab">
+                    <DockPanel Margin="8,8,8,6">
+                        <StackPanel DockPanel.Dock="Top">
+                            <TextBlock Text="{Binding SelectorHeadline}" TextWrapping="Wrap" FontWeight="SemiBold"
+                                       AutomationProperties.AutomationId="SelectorHeadline">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectorTone}" Value="ok">
+                                                <Setter Property="Foreground" Value="#15803D"/>
+                                            </DataTrigger>
+                                            <DataTrigger Binding="{Binding SelectorTone}" Value="bad">
+                                                <Setter Property="Foreground" Value="#B91C1C"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <ComboBox Margin="0,8,0,0" ItemsSource="{Binding SelectorChoices}" SelectedItem="{Binding SelectedChoice}"
+                                      DisplayMemberPath="Label" ToolTip="Other verified selectors for the same element"
+                                      Visibility="{Binding HasAlternatives, Converter={StaticResource BoolToVisibility}}"
+                                      AutomationProperties.AutomationId="SelectorChoices"/>
+
+                            <TextBox Margin="0,8,0,0" Text="{Binding SelectorSteps, Mode=OneWay}" IsReadOnly="True"
+                                     FontFamily="Consolas" FontSize="12" BorderThickness="0" Background="#F9FAFB" Padding="6,4"
+                                     TextWrapping="Wrap" AutomationProperties.AutomationId="SelectorSteps"/>
+
+                            <ItemsControl ItemsSource="{Binding SelectorWarnings}" Margin="0,6,0,0" AutomationProperties.AutomationId="SelectorWarnings">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding StringFormat='⚠ {0}'}" TextWrapping="Wrap" Foreground="#B45309" Margin="0,2"/>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+
+                            <TextBlock Text="{Binding OcclusionText}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       AutomationProperties.AutomationId="OcclusionText">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding OcclusionIsWarning}" Value="True">
+                                                <Setter Property="Foreground" Value="#B45309"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+
+                            <DockPanel Margin="0,10,0,6">
+                                <Button DockPanel.Dock="Right" Padding="10,3" Content="Copy code" Command="{Binding CopyCodeCommand}"
+                                        AutomationProperties.AutomationId="CopyCodeButton"/>
+                                <ComboBox ItemsSource="{Binding Snippets}" SelectedItem="{Binding SelectedSnippet}" DisplayMemberPath="Title"
+                                          Margin="0,0,8,0" AutomationProperties.AutomationId="LanguageChoice"/>
+                            </DockPanel>
+                        </StackPanel>
+
+                        <TextBox Text="{Binding SelectedSnippet.Code, Mode=OneWay}" IsReadOnly="True"
+                                 FontFamily="Consolas" FontSize="12" Padding="6"
+                                 HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                 AutomationProperties.AutomationId="CodeText"/>
+                    </DockPanel>
+                </TabItem>
+                </TabControl>
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>

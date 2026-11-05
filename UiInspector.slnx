@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/UiInspector.App/UiInspector.App.csproj" />
+    <Project Path="src/UiInspector.Cli/UiInspector.Cli.csproj" />
+    <Project Path="src/UiInspector.Core/UiInspector.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/UiInspector.Core.Tests/UiInspector.Core.Tests.csproj" />
+  </Folder>
+</Solution>
