@@ -122,6 +122,53 @@ internal static class PageScript
         })()
         """;
 
+    /// <summary>
+    /// Short texts inside <c>chain[boxIndex]</c> that aren't part of the target: candidates for
+    /// telling that container apart ("Order 1042" in one of many identical rows). Each text is
+    /// taken from the smallest element that holds it, as Playwright's getByText does.
+    /// </summary>
+    public static string LandmarkTexts(int boxIndex, int targetIndex) => $$"""
+        (() => {
+          const u = {{State}};
+          const box = u.chain[{{boxIndex}}], target = u.chain[{{targetIndex}}];
+          const norm = (e) => (e.textContent || '').replace(/\s+/g, ' ').trim();
+          const out = [];
+          for (const e of box.querySelectorAll('*')) {
+            if (e === target || e.contains(target) || target.contains(e)) continue;
+            if (e.tagName === 'SCRIPT' || e.tagName === 'STYLE') continue;
+            const text = norm(e);
+            if (!text || text.length > 40 || out.includes(text)) continue;
+            if ([...e.children].some(c => norm(c) === text)) continue;
+            out.push(text);
+            if (out.length >= 20) break;
+          }
+          return out;
+        })()
+        """;
+
+    /// <summary>
+    /// Checks a landmark text: how many smallest elements in the document have exactly that text,
+    /// and, if one, how many ancestors with the container's tag lie between it and
+    /// <c>chain[boxIndex]</c> (1 = the nearest, so XPath <c>ancestor::div[1]</c>). Uses the same
+    /// XPath that the generated Selenium code does.
+    /// </summary>
+    public static string CheckLandmark(int boxIndex, string textJsonLiteral) => $$"""
+        (() => {
+          const u = {{State}};
+          const box = u.chain[{{boxIndex}}], text = {{textJsonLiteral}};
+          const lit = text.includes("'") ? 'concat(' + text.split("'").map(p => "'" + p + "'").join(`, "'", `) + ')' : "'" + text + "'";
+          const xpath = '//*[normalize-space(.)=' + lit + ' and not(*[normalize-space(.)=' + lit + '])]';
+          const r = u.doc.evaluate(xpath, u.doc, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+          if (r.snapshotLength !== 1) return { count: r.snapshotLength, level: -1 };
+          let level = 0;
+          for (let n = r.snapshotItem(0).parentElement; n; n = n.parentElement) {
+            if (n.tagName === box.tagName) level++;
+            if (n === box) return { count: 1, level };
+          }
+          return { count: 1, level: -1 };
+        })()
+        """;
+
     /// <summary>Counts matches of a CSS selector among a frame's siblings in its parent document.</summary>
     public static string CountFrameCss(int frameIndex, string cssJsonLiteral) => $$"""
         (() => {

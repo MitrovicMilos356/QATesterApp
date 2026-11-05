@@ -99,6 +99,27 @@ public class CodeTemplateTests
     }
 
     [Fact]
+    public void RowFoundByItsText_IsWrittenInEachLibrarysSyntax()
+    {
+        var selector = DiscordChat with
+        {
+            Steps =
+            [
+                new([C(SelectorProperty.ControlType, "Pane")]) { Has = new([C(SelectorProperty.ControlType, "Text"), C(SelectorProperty.Name, "Order 1042")]) },
+                new([C(SelectorProperty.ControlType, "Button"), C(SelectorProperty.Name, "Delete")]),
+            ],
+        };
+        var button = new ElementInfo { ControlType = "Button", Name = "Delete", Patterns = ["Invoke"] };
+
+        Assert.Contains("window.FindAllDescendants(cf.ByControlType(ControlType.Pane)).Where(e => e.FindFirstDescendant(cf.ByControlType(ControlType.Text).And(cf.ByName(\"Order 1042\"))) != null).FirstOrDefault()",
+            Code(selector, button, "flaui"));
+        Assert.Contains("scope1 = window.PaneControl(Compare=lambda c, d: c.TextControl(Name='Order 1042').Exists(0, 0))", Code(selector, button, "uiautomation"));
+        Assert.Contains("child_window(control_type='Pane', predicate_func=lambda e: len(e.descendants(control_type='Text', title='Order 1042')) > 0)", Code(selector, button, "pywinauto"));
+        Assert.Contains(".//Pane[.//Text[@Name=\\'Order 1042\\']]", Code(selector, button, "appium"));
+        Assert.Equal("Pane containing Text [Name = \"Order 1042\"]", selector.Steps[0].ToString());
+    }
+
+    [Fact]
     public void QuotesAndBackslashesAreEscapedPerLanguage()
     {
         var selector = DiscordChat with

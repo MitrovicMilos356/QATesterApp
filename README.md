@@ -47,7 +47,12 @@ Selecting any element generates a selector and **checks it against the live app*
    together with the ControlType).
 2. If that matches several elements: the same, scoped to the nearest ancestor that is itself
    unique (e.g. *Button "Delete" inside Pane #ordersPanel*).
-3. Last resort: its position among the matches, clearly marked as fragile.
+3. If no ancestor is unique by itself: the nearest one told apart by **text it contains**, the
+   way a person would (*Button "Delete" inside the Pane containing "Order 1042"*). This survives
+   rows being added, removed or reordered; it does tie the test to that data.
+4. Last resort, when nothing at all tells look-alikes apart: its position among the matches,
+   clearly marked as fragile. The fix then is an AutomationId from the developers (WPF
+   `AutomationProperties.AutomationId`, WinForms `Name`, web `data-testid`).
 
 Attributes that would break are rejected or flagged with a reason: generated hashes
 (`content_d125d2`), GUIDs, WinForms per-build class names, window handles used as IDs, designer
@@ -80,7 +85,10 @@ override it. Without a port, the Selector tab explains how to get one.
 
 The web locators follow Playwright's own preferences: `getByTestId` > `getByRole(role, { name })` >
 `#id` > stable CSS classes, anchored to a named region or list when needed (*button "Delete" inside
-region "Orders"*), and an index only as a last resort. Each one is **verified in the live page**:
+region "Orders"*). When rows have nothing like that (React-style `<div>`s with hashed classes),
+the element is found through a text only its row has:
+`getByText('Order 1042', { exact: true }).locator('xpath=ancestor::div[1]').getByRole('button', { name: 'Delete' })`,
+and for Selenium the same as XPath, then CSS inside that row. An index is the last resort. Each one is **verified in the live page**:
 CSS by counting matches (reaching into open Shadow DOM, as Playwright does), roles by checking each
 candidate's computed role and name in Chromium's accessibility tree. Selenium gets a separate CSS
 locator that is unique within its Shadow DOM root, plus steps through each shadow host.
@@ -214,6 +222,8 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | Selenium 4.52 (Python) | Same six cases, 6/6 passed |
 | Selenium (Java) | Generated, **not run**: this machine has Java 8, and Selenium 4 needs Java 11+ |
 | Recorded scripts (FlaUI, uiautomation, pywinauto) | A recorded 6-step workflow (text, password from an environment variable, check box, button, anchored duplicate button, text check) run unedited against a fresh fixture: 3/3 left it in exactly the recorded state and passed their check. Key and mouse steps were checked by unit tests only, since running them would type into or click on whatever is in front |
+| Rows found by their text (FlaUI, uiautomation, pywinauto) | The Delete button of "Order 1042", in a list of rows with no IDs and identical buttons, run against the fixture (3/3), then against a later version of it with a new row on top and the rows reordered: 3/3 still deleted Order 1042. The old position-based selector deleted Order 1043 there, without any error |
+| Web rows found by their text (Playwright JS/Python/C#, Selenium Python) | The Delete button of "Order 1042" in React-style rows (no ids, hashed classes), run against the page and against a later version of it (new row on top, rows reordered): 8/8 deleted Order 1042. A position-based locator deleted Order 1043 on the later version, without any error. The earlier 24 web cases still pass |
 | Recorded scripts (Appium) | Generated and unit-tested, **not run** (no Appium server) |
 | Recorder with real mouse and keyboard | **Not run here**: the hook was installed and removed in a test, but recording real input would have captured the person using this computer. Try it on your apps |
 
@@ -235,5 +245,7 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 - **WinForms check boxes support both Invoke and Toggle.** Code uses Toggle for check boxes, since it says what the step does.
 - **A WinForms TextBox takes its Name from the label before it** (the fixture's notes box is named "Status: 3 items"). Its AutomationId is what identifies it.
 - **A busy app can drop out of a single tree search**: under load, one selector check right after a recorded click found no window. The recorder retries once before falling back to an unverified selector.
+- **On web pages, "the div containing this text" isn't specific enough**: every outer wrapper `<div>` contains it too. The locator starts from the element showing exactly that text and goes up to its nearest container (`ancestor::div[1]`).
+- **Chromium can leave plain `<div>`s out of the UIA tree**, so the UIA parent of a label isn't necessarily its row.
 - **The .NET Framework UI Automation client (`System.Windows.Automation`) doesn't see WinForms AutomationIds**, unlike UIA3 (FlaUI, uiautomation). Tools built on it see a different tree.
 - Mixed-DPI monitors haven't been tested yet (the development machine has one 100 % monitor).

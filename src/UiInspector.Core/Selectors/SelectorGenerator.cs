@@ -19,6 +19,11 @@ public sealed class SelectorGenerator(ElementInspector inspector)
     private const int ScopePenalty = 5;
     private const int IndexPenalty = 45;
     private const int MaxParentWalk = 40;
+    private const int MaxContentAnchorDepth = 4;
+    private const int MaxLookAlikeContainers = 100;
+    private const int MaxLandmarkScan = 300;
+    private const int MaxLandmarksTried = 12;
+    private const int ContentAnchorPenalty = 15;
 
     internal const string LanguageWarning = "Names follow the app's UI language; this part breaks if the app runs in another language.";
 
@@ -208,7 +213,14 @@ public sealed class SelectorGenerator(ElementInspector inspector)
         }
         if (selectors.Count > 0) return selectors;
 
-        // 3. Last resort: position among the matches, inside the best scope available.
+        // 3. Inside the nearest ancestor that stands out by text it contains: the row with
+        //    "Order 1042" in it, the card titled "Invoices". This is how a person tells
+        //    look-alike controls apart, and it survives rows being added or reordered.
+        var scopeIndex = usedAnchor is { } scoped ? path.ToList().FindIndex(e => e.IsSameElement(scoped.Element)) : 1;
+        selectors.AddRange(ContentAnchoredSelectors(automation, path, Math.Max(scopeIndex, 1), targetCandidates, usedAnchor?.Step, Make));
+        if (selectors.Count > 0) return selectors;
+
+        // 4. Last resort: position among the matches, inside the best scope available.
         var scopeElement = usedAnchor?.Element.Ref!.Element ?? windowElement;
         foreach (var candidate in targetCandidates)
         {
@@ -227,6 +239,98 @@ public sealed class SelectorGenerator(ElementInspector inspector)
             break;
         }
         return selectors;
+    }
+
+    private delegate Selector MakeSelector(IReadOnlyList<SelectorStep> steps, string strategy, int score, IEnumerable<string?> warnings, SelectorVerification verification);
+
+    /// <param name="scopeIndex">Path index of the search scope: the window, or the nearest uniquely identifiable ancestor.</param>
+    /// <param name="scopeAnchor">The step that finds that ancestor, or null for the window.</param>
+    private List<Selector> ContentAnchoredSelectors(
+        AutomationBase automation, IReadOnlyList<ElementInfo> path, int scopeIndex, List<Candidate> targetCandidates,
+        Candidate? scopeAnchor, MakeSelector make)
+    {
+        var selectors = new List<Selector>();
+        var target = path[^1];
+        var scope = path[scopeIndex].Ref!.Element;
+        var lowest = Math.Max(scopeIndex + 1, path.Count - 1 - MaxContentAnchorDepth);
+
+        for (var i = path.Count - 2; i >= lowest; i--)
+        {
+            var container = path[i];
+            if (string.IsNullOrEmpty(container.ControlType) || container.Ref is null) continue;
+            var containerStep = ContainerStep(container);
+            if (FindMatches(automation, scope, containerStep, TreeScope.Descendants).Count > MaxLookAlikeContainers) continue;
+
+            foreach (var landmark in Landmarks(automation, container, target))
+            {
+                var anchorStep = containerStep with { Has = landmark.Step };
+                if (Verify(FindMatches(automation, scope, anchorStep, TreeScope.Descendants), container).Status != VerificationStatus.Unique) continue;
+
+                foreach (var candidate in targetCandidates)
+                {
+                    var verification = Verify(FindMatches(automation, container.Ref.Element, candidate.Step, TreeScope.Descendants), target);
+                    if (verification.Status != VerificationStatus.Unique) continue;
+
+                    IReadOnlyList<SelectorStep> steps = scopeAnchor is { } a ? [a.Step, anchorStep, candidate.Step] : [anchorStep, candidate.Step];
+                    var where = $"{container.ControlType} containing \"{landmark.Text}\"" + (scopeAnchor is { } s ? $" inside {Describe(s.Step)}" : "");
+                    selectors.Add(make(steps, $"{candidate.Strategy} inside {where}",
+                        Math.Min(candidate.Score, landmark.Score) - ContentAnchorPenalty,
+                        candidate.Warnings.Concat(scopeAnchor?.Warnings ?? []).Append(landmark.Warning),
+                        verification));
+                }
+                if (selectors.Count > 0) return selectors;
+            }
+        }
+        return selectors;
+    }
+
+    private static SelectorStep ContainerStep(ElementInfo container)
+    {
+        var conditions = new List<SelectorCondition> { new(SelectorProperty.ControlType, container.ControlType) };
+        var className = AttributeStability.AnalyzeClassName(container.ClassName, container.FrameworkId);
+        if (className.IsUsable) conditions.Add(new(SelectorProperty.ClassName, className.Value));
+        return new SelectorStep(conditions);
+    }
+
+    private sealed record Landmark(SelectorStep Step, string Text, int Score, string? Warning);
+
+    /// <summary>
+    /// Texts inside <paramref name="container"/> that might tell it apart from look-alikes: labels
+    /// first, other named elements next. The target's own name is skipped (every look-alike has it).
+    /// </summary>
+    private static IEnumerable<Landmark> Landmarks(AutomationBase automation, ElementInfo container, ElementInfo target)
+    {
+        var props = automation.PropertyLibrary.Element;
+        var request = new CacheRequest { TreeScope = TreeScope.Element, AutomationElementMode = AutomationElementMode.None };
+        request.Add(props.Name);
+        request.Add(props.ControlType);
+        request.Add(props.RuntimeId);
+
+        List<(string Type, string Name)> named;
+        using (request.Activate())
+        {
+            var descendants = container.Ref!.Element.FindAllDescendants();
+            if (descendants.Length > MaxLandmarkScan) yield break;
+            named = descendants
+                .Where(d => !(d.Properties.RuntimeId.ValueOrDefault ?? []).AsSpan().SequenceEqual(target.RuntimeId.ToArray()))
+                .Select(d => (Type: d.Properties.ControlType.TryGetValue(out var t) ? t.ToString() : "", Name: d.Properties.Name.ValueOrDefault ?? ""))
+                .Where(d => d.Type.Length > 0 && d.Name.Trim().Length > 0 && d.Name.Trim() != target.Name.Trim())
+                .Distinct()
+                .ToList();
+        }
+
+        var ranked = named
+            .Select(d => (d.Type, Verdict: AttributeStability.AnalyzeLandmarkText(d.Name)))
+            .Where(d => d.Verdict.IsUsable)
+            .OrderBy(d => d.Type == "Text" ? 0 : 1)
+            .ThenBy(d => d.Verdict.Value.Length)
+            .Take(MaxLandmarksTried);
+
+        foreach (var (type, verdict) in ranked)
+        {
+            var step = new SelectorStep([new(SelectorProperty.ControlType, type), new(SelectorProperty.Name, verdict.Value, verdict.Match)]);
+            yield return new Landmark(step, verdict.Value, verdict.Stability == Stability.Stable ? 80 : 65, verdict.Warning);
+        }
     }
 
     private sealed record Candidate(SelectorStep Step, int Score, string Strategy, IReadOnlyList<string?> Warnings);
@@ -311,18 +415,25 @@ public sealed class SelectorGenerator(ElementInspector inspector)
     private static List<Match> FindMatches(AutomationBase automation, AutomationElement scope, SelectorStep step, TreeScope treeScope)
     {
         var props = automation.PropertyLibrary.Element;
-        var request = new CacheRequest { TreeScope = TreeScope.Element, AutomationElementMode = AutomationElementMode.None };
+        var request = new CacheRequest
+        {
+            TreeScope = TreeScope.Element,
+            // Checking what an element contains needs a live element to search inside.
+            AutomationElementMode = step.Has is null ? AutomationElementMode.None : AutomationElementMode.Full,
+        };
         request.Add(props.RuntimeId);
         request.Add(props.Name);
         request.Add(props.AutomationId);
         request.Add(props.ClassName);
 
+        // Cached values are only read while the request is active, so everything happens inside it.
         using (request.Activate())
         {
             var found = scope.FindAll(treeScope, BuildCondition(automation.ConditionFactory, step));
             var contains = step.Conditions.Where(c => c.Match == MatchKind.Contains).ToList();
             return found
                 .Where(e => contains.All(c => (Read(e, c.Property) ?? "").Contains(c.Value, StringComparison.Ordinal)))
+                .Where(e => step.Has is null || FindMatches(automation, e, step.Has, TreeScope.Descendants).Count > 0)
                 .Select(e => new Match(e.Properties.RuntimeId.TryGetValue(out var id) ? id : []))
                 .ToList();
         }

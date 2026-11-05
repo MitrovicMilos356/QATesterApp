@@ -2,7 +2,9 @@
 # must handle. It opens off-screen (no monitor there) so tests never cover the user's screen;
 # UI Automation reads it the same either way. Clicking Save sets the status label to "Saved",
 # which lets an end-to-end check prove that generated code really acted on the right button.
-param([int]$X = -3000, [int]$Y = -3000, [string]$Title = 'UiInspector Selector Fixture', [string]$FormName = 'SelectorFixtureForm')
+# -Reordered simulates a later version of the app: a new order row on top and the rows in another
+# order, to check that generated code still finds the same row.
+param([int]$X = -3000, [int]$Y = -3000, [string]$Title = 'UiInspector Selector Fixture', [string]$FormName = 'SelectorFixtureForm', [switch]$Reordered)
 
 Add-Type -AssemblyName System.Windows.Forms
 
@@ -24,7 +26,7 @@ $form.Text = $Title
 $form.Name = $FormName
 $form.StartPosition = 'Manual'
 $form.Location = New-Object System.Drawing.Point($X, $Y)
-$form.Size = New-Object System.Drawing.Size(540, 420)
+$form.Size = New-Object System.Drawing.Size(540, 560)
 $form.ShowInTaskbar = $false
 
 $status = New-Object System.Windows.Forms.Label
@@ -66,5 +68,19 @@ $passwordInfo = New-Object System.Windows.Forms.Label
 $passwordInfo.Name = 'passwordInfo'; $passwordInfo.Text = 'Password length 0'; $passwordInfo.Location = New-Object System.Drawing.Point(320, 315); $passwordInfo.AutoSize = $true
 $password.Add_TextChanged({ $passwordInfo.Text = "Password length $($password.Text.Length)" })
 
-$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes, $remember, $password, $passwordInfo))
+# A list of rows with nothing to identify them but the text in them: each row panel has no
+# name, and every row has the same "Delete" button. A selector has to find the row by its label.
+$orderNumbers = if ($Reordered) { 1040, 1043, 1042, 1041 } else { 1041, 1042, 1043 }
+$ordersList = New-Panel 'ordersList' 10 345 510 165
+for ($i = 0; $i -lt $orderNumbers.Count; $i++) {
+    $number = $orderNumbers[$i]
+    $row = New-Object System.Windows.Forms.Panel
+    $row.Location = New-Object System.Drawing.Point(2, (2 + $i * 40)); $row.Size = New-Object System.Drawing.Size(500, 36)
+    $label = New-Object System.Windows.Forms.Label
+    $label.Text = "Order $number"; $label.Location = New-Object System.Drawing.Point(5, 10); $label.AutoSize = $true
+    $row.Controls.AddRange(@($label, (Add-Reporter (New-Button 'Delete' '' 400 6) "Deleted $number")))
+    $ordersList.Controls.Add($row)
+}
+
+$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes, $remember, $password, $passwordInfo, $ordersList))
 [System.Windows.Forms.Application]::Run($form)

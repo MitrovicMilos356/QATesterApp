@@ -19,6 +19,8 @@ public sealed partial class WebBridge
     private const int IndexPenalty = 45;
     private const double ViewportTolerance = 24;
     private const int MaxRoleCandidates = 400;
+    private const int MaxLandmarks = 8;
+    private const int ContentPenalty = 15;
 
     private static readonly string[] TestIdAttributes = ["data-testid", "data-test-id", "data-test", "data-qa", "data-cy"];
 
@@ -271,7 +273,21 @@ public sealed partial class WebBridge
         }
         if (selectors.Count > 0) return Ranked(selectors);
 
-        // 3. Last resort: position among matches.
+        // 3. Inside the nearest container told apart by text in it: the row around "Order 1042".
+        //    Survives rows being added, removed or reordered, unlike a position.
+        if (await TextAnchorAsync(session, chain, targetIndex, ct) is { } around)
+        {
+            foreach (var c in candidates)
+            {
+                var match = await CountAsync(session, ax, c.Locator, $"u.chain[{around.ChainIndex}]", targetIndex, ct);
+                if (!match.IsUniqueTarget) continue;
+                selectors.Add(Make([around.TextLocator, around.Container, c.Locator], $"{c.Strategy} inside the <{around.Tag}> around \"{around.Text}\"",
+                    Math.Min(c.Score, around.Score) - ContentPenalty, c.Warnings.Append(around.Warning), match.Verification));
+            }
+            if (selectors.Count > 0) return Ranked(selectors);
+        }
+
+        // 4. Last resort: position among matches.
         var scope = usedAnchor is { } ua ? $"u.chain[{ua.Index}]" : "u.doc";
         foreach (var c in candidates)
         {
@@ -421,8 +437,26 @@ public sealed partial class WebBridge
             }
         }
 
+        // Inside the container around a text, found by XPath (Selenium's CSS can't match text).
+        if (await TextAnchorAsync(session, chain, targetIndex, ct) is { } around)
+        {
+            foreach (var (css, warnings) in cssCandidates)
+            {
+                var m = Match.Parse(await session.EvaluateValueAsync(PageScript.CountCss($"u.chain[{around.ChainIndex}]", Js(css), deep: false), ct));
+                if (!m.IsUniqueTarget) continue;
+                return new SeleniumSelector
+                {
+                    Frames = frames,
+                    ContainerXPath = around.SeleniumXPath,
+                    Target = new WebLocator { Kind = WebLocatorKind.Css, Value = css },
+                    Verification = m.Verification,
+                    Warnings = warnings.Append(around.Warning).OfType<string>().ToList(),
+                };
+            }
+        }
+
         // Positional fallback on the plain tag.
-        var tagMatch = Match.Parse(await session.EvaluateValueAsync(PageScript.CountCss("u.target.getRootNode()", Js(node.Tag), deep: false), ct));
+        var tagMatch =Match.Parse(await session.EvaluateValueAsync(PageScript.CountCss("u.target.getRootNode()", Js(node.Tag), deep: false), ct));
         if (tagMatch.Index < 0) return null;
         return new SeleniumSelector
         {
@@ -432,6 +466,70 @@ public sealed partial class WebBridge
             Verification = new SelectorVerification(VerificationStatus.Unique, 1),
             Warnings = [$"Uses position {tagMatch.Index + 1} of {tagMatch.Count} <{node.Tag}> elements; it breaks if the page changes."],
         };
+    }
+
+    // ------------------------------------------------------------------ containers told apart by text
+
+    /// <summary>
+    /// A container found through a text inside it: the element showing exactly <see cref="Text"/>
+    /// (unique in the page), then its <see cref="Level"/>-th <see cref="Tag"/> ancestor.
+    /// </summary>
+    private sealed record TextAnchor(int ChainIndex, string Tag, string Text, int Level, int Score, string? Warning)
+    {
+        public WebLocator TextLocator => new() { Kind = WebLocatorKind.Text, Value = Text };
+
+        public WebLocator Container => new() { Kind = WebLocatorKind.XPath, Value = $"ancestor::{Tag}[{Level}]" };
+
+        /// <summary>The same in one XPath; the text part matches what <see cref="PageScript.CheckLandmark"/> verified.</summary>
+        public string SeleniumXPath
+        {
+            get
+            {
+                var text = XPathLiteral(Text);
+                return $"//*[normalize-space(.)={text} and not(*[normalize-space(.)={text}])]/ancestor::{Tag}[{Level}]";
+            }
+        }
+    }
+
+    /// <summary>
+    /// The nearest ancestor of the target that holds a text found nowhere else in the page, and
+    /// that text. Not for Shadow DOM: XPath and Selenium can't search across shadow roots.
+    /// </summary>
+    private static async Task<TextAnchor?> TextAnchorAsync(CdpSession session, List<DomNode> chain, int targetIndex, CancellationToken ct)
+    {
+        var target = chain[targetIndex];
+        if (target.InShadow) return null;
+
+        var limit = Math.Min(chain.Count, targetIndex + 1 + MaxAnchors);
+        for (var i = targetIndex + 1; i < limit; i++)
+        {
+            var box = chain[i];
+            if (box.InShadow || box.Tag is "body" or "html" || !SimpleIdentifier().IsMatch(box.Tag)) break;
+
+            var texts = (await session.EvaluateValueAsync(PageScript.LandmarkTexts(i, targetIndex), ct))
+                .EnumerateArray().Select(t => t.GetString() ?? "");
+            var ranked = texts
+                .Select(AttributeStability.AnalyzeLandmarkText)
+                .Where(v => v.IsUsable && v.Match == MatchKind.Exact && !string.Equals(v.Value, target.Text, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(v => v.Value.Length)
+                .Take(MaxLandmarks);
+
+            foreach (var verdict in ranked)
+            {
+                var check = await session.EvaluateValueAsync(PageScript.CheckLandmark(i, Js(verdict.Value)), ct);
+                var level = check.GetProperty("level").GetInt32();
+                if (check.GetProperty("count").GetInt32() != 1 || level < 1) continue;
+                return new TextAnchor(i, box.Tag, verdict.Value, level, verdict.Stability == Stability.Stable ? 80 : 65, verdict.Warning);
+            }
+        }
+        return null;
+    }
+
+    private static string XPathLiteral(string value)
+    {
+        if (!value.Contains('\'')) return $"'{value}'";
+        if (!value.Contains('"')) return $"\"{value}\"";
+        return "concat('" + value.Replace("'", "', \"'\", '") + "')";
     }
 
     // ------------------------------------------------------------------ frames

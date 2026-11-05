@@ -235,7 +235,7 @@ public sealed class Recorder : IAsyncDisposable
     private Task OnMouseUp(RawMouse m)
     {
         bool dragged;
-        lock (_gate) dragged = _builder.MouseUp(m.Position);
+        lock (_gate) dragged = _builder.MouseUp(m.Position, m.Button);
         if (dragged)
         {
             Notice?.Invoke("Drags aren't recorded (only clicks), so that one was left out.");
@@ -264,6 +264,7 @@ public sealed class Recorder : IAsyncDisposable
         {
             var ids = entries.Select(b.AddText).ToList();
             if (path is not null) ids.Add(b.AddClick(path, m.Button, m.Position, m.Time));
+            else b.IgnoreDown();
             return ids;
         }, path?[^1]);
     }
@@ -283,6 +284,7 @@ public sealed class Recorder : IAsyncDisposable
         {
             var ids = entries.Select(b.AddText).ToList();
             if (path is not null) ids.Add(b.AddClick(path, c.Button, center, c.Time));
+            else b.IgnoreDown();
             return ids;
         }, path?[^1]);
     }

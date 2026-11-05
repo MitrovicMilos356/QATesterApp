@@ -9,6 +9,7 @@
   a { display: block; padding: 6px; }
   .status__a91f3 { color: #666; font-size: 14px; }
   iframe { width: 320px; height: 70px; border: 1px solid #999; }
+  .row__5b7e2 { padding: 2px 6px; }
 </style>
 </head>
 <body>
@@ -44,8 +45,25 @@
 <!-- Open Shadow DOM. -->
 <fancy-card></fancy-card>
 
+<!--
+  React-style rows: hashed class names, no ids, the same "Delete" in every row. Only the order
+  number tells them apart. With ?reordered the page looks like a later version: a new row on top
+  and the rows in another order, to check that generated code still finds the same row.
+-->
+<div class="orders__5b7e2" id="orders-placeholder"></div>
+
 <script>
   function report(text) { document.getElementById('status').textContent = text; }
+  const numbers = location.search.includes('reordered') ? [1040, 1043, 1042, 1041] : [1041, 1042, 1043];
+  const list = document.getElementById('orders-placeholder');
+  list.removeAttribute('id');
+  for (const n of numbers) {
+    const row = document.createElement('div');
+    row.className = 'row__5b7e2';
+    row.innerHTML = `<span class="num__5b7e2">Order ${n}</span> <span>Pending</span> <button class="btn__972a0">Delete</button>`;
+    row.querySelector('button').onclick = () => report('deleted ' + n);
+    list.appendChild(row);
+  }
   customElements.define('fancy-card', class extends HTMLElement {
     constructor() {
       super();

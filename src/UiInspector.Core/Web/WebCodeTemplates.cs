@@ -36,6 +36,9 @@ public static class WebCodeTemplates
         web.Element is { } e && (e.Tag is "input" or "textarea" || e.Role is "textbox" or "searchbox")
         && !(e.Attributes.TryGetValue("type", out var type) && type is "checkbox" or "radio" or "button" or "submit" or "password");
 
+    private static string SeleniumStrategy(SeleniumSelector s) =>
+        s.ContainerXPath is null ? $"CSS {s.Target}" : $"CSS {s.Target} inside the container found by XPath {s.ContainerXPath}";
+
     private static string Endpoint(WebResult web) => $"http://127.0.0.1:{web.Port}";
 
     // ------------------------------------------------------------------ Playwright: JavaScript
@@ -141,6 +144,12 @@ public static class WebCodeTemplates
             ? $".GetByRole(AriaRole.{CsRole(l.Role)})"
             : $".GetByRole(AriaRole.{CsRole(l.Role)}, new() {{ Name = {Cs(l.Name)}{(l.Exact ? ", Exact = true" : "")} }})",
 
+        (WebLocatorKind.Text, PwFlavor.Js) => $".getByText({Js(l.Value)}, {{ exact: true }})",
+        (WebLocatorKind.Text, PwFlavor.Py) => $".get_by_text({Py(l.Value)}, exact=True)",
+        (WebLocatorKind.Text, _) => $".GetByText({Cs(l.Value)}, new() {{ Exact = true }})",
+
+        (WebLocatorKind.XPath, _) => PwCss("xpath=" + l.Value, f),
+
         _ => PwCss(l.Value, f),
     };
 
@@ -151,7 +160,7 @@ public static class WebCodeTemplates
         _ => $".Locator({Cs(css)})",
     };
 
-    // Playwright for .NET names enum members by capitalizing the ARIA role: "listitem" → Listitem.
+    // Playwright for .NET names enum members by capitalizing the ARIA role: "listitem" â†’ Listitem.
     private static string CsRole(string role) => char.ToUpperInvariant(role[0]) + role[1..];
 
     // ------------------------------------------------------------------ Selenium: Python
@@ -161,7 +170,7 @@ public static class WebCodeTemplates
         var edge = web.Browser == BrowserFlavor.Edge;
         var sb = new StringBuilder();
         sb.AppendLine("# pip install selenium   (Selenium Manager downloads the matching driver)");
-        Header(sb, "#", web, $"CSS {s.Target}", s.Verification, s.Warnings);
+        Header(sb, "#", web, SeleniumStrategy(s), s.Verification, s.Warnings);
         if (!edge) sb.AppendLine("# Electron apps: chromedriver must match the app's Chromium version, not your Chrome's.");
         sb.AppendLine("from selenium import webdriver");
         sb.AppendLine("from selenium.webdriver.common.by import By");
@@ -198,6 +207,12 @@ public static class WebCodeTemplates
             sb.AppendLine($"shadow{i + 1} = wait.until(lambda d: {find}).shadow_root");
             scope = $"shadow{i + 1}";
         }
+        if (s.ContainerXPath is { } container)
+        {
+            sb.AppendLine("# The container around the text, then the element inside it.");
+            sb.AppendLine($"container = wait.until(EC.presence_of_element_located((By.XPATH, {Py(container)})))");
+            scope = "container";
+        }
 
         var target = s.Target.Index is { } ti
             ? $"wait.until(lambda d: {scope}.find_elements(By.CSS_SELECTOR, {Py(s.Target.Value)})[{ti}])"
@@ -220,7 +235,7 @@ public static class WebCodeTemplates
         var package = edge ? "edge" : "chrome";
         var sb = new StringBuilder();
         sb.AppendLine("// Maven: org.seleniumhq.selenium:selenium-java (4.x, Java 11+; Selenium Manager downloads the driver)");
-        Header(sb, "//", web, $"CSS {s.Target}", s.Verification, s.Warnings);
+        Header(sb, "//", web, SeleniumStrategy(s), s.Verification, s.Warnings);
         if (!edge) sb.AppendLine("// Electron apps: chromedriver must match the app's Chromium version, not your Chrome's.");
         sb.AppendLine("import java.time.Duration;");
         sb.AppendLine("import org.openqa.selenium.*;");
@@ -260,6 +275,12 @@ public static class WebCodeTemplates
                 : $"{scope}.findElement(By.cssSelector({Java(host.Value)}))";
             sb.AppendLine($"        SearchContext shadow{i + 1} = {find}.getShadowRoot();");
             scope = $"shadow{i + 1}";
+        }
+        if (s.ContainerXPath is { } container)
+        {
+            sb.AppendLine("        // The container around the text, then the element inside it.");
+            sb.AppendLine($"        WebElement container = wait.until(ExpectedConditions.presenceOfElementLocated(By.xpath({Java(container)})));");
+            scope = "container";
         }
 
         var target = s.Target.Index is { } ti

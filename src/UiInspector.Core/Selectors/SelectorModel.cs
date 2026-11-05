@@ -25,6 +25,12 @@ public sealed record SelectorCondition(SelectorProperty Property, string Value, 
 /// </summary>
 public sealed record SelectorStep(IReadOnlyList<SelectorCondition> Conditions, int? Index = null)
 {
+    /// <summary>
+    /// Only elements that contain a descendant matching this step: a row told apart by the text
+    /// in it ("the Pane containing Text 'Order 1042'"), when the row itself has no ID or name.
+    /// </summary>
+    public SelectorStep? Has { get; init; }
+
     public string? ControlType => Conditions.FirstOrDefault(c => c.Property == SelectorProperty.ControlType)?.Value;
 
     public SelectorCondition? Get(SelectorProperty property) => Conditions.FirstOrDefault(c => c.Property == property);
@@ -38,6 +44,7 @@ public sealed record SelectorStep(IReadOnlyList<SelectorCondition> Conditions, i
         var text = ControlType ?? "*";
         var joined = string.Join(", ", filters);
         if (joined.Length > 0) text += $" [{joined}]";
+        if (Has is { } has) text += $" containing {has}";
         if (Index is { } index) text += $" #{index + 1}";
         return text;
     }

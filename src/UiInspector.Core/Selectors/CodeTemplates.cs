@@ -122,11 +122,23 @@ public static partial class CodeTemplates
         var all = children ? "FindAllChildren" : "FindAllDescendants";
         var first = children ? "FindFirstChild" : "FindFirstDescendant";
 
-        if (contains.Count == 0 && step.Index is null) return $"{scope}.{first}({condition})";
+        if (contains.Count == 0 && step.Index is null && step.Has is null) return $"{scope}.{first}({condition})";
 
         var query = $"{scope}.{all}({condition})";
         foreach (var c in contains) query += $".Where(e => e.{c.Property}.Contains({Cs(c.Value)}))";
+        if (step.Has is { } has) query += $".Where(e => {FlaUiHas("e", has)})";
         return step.Index is { } index ? $"{query}.ElementAtOrDefault({index})" : $"{query}.FirstOrDefault()";
+    }
+
+    // "Contains a descendant matching this step", as a C# boolean expression on `element`.
+    private static string FlaUiHas(string element, SelectorStep has)
+    {
+        var exact = has.Conditions.Where(c => c.Match == MatchKind.Exact).Select(FlaUiCondition).ToList();
+        var condition = string.Join(".And(", exact) + new string(')', Math.Max(0, exact.Count - 1));
+        var contains = has.Conditions.Where(c => c.Match == MatchKind.Contains).ToList();
+        return contains.Count == 0
+            ? $"{element}.FindFirstDescendant({condition}) != null"
+            : $"{element}.FindAllDescendants({condition}).Any(d => {string.Join(" && ", contains.Select(c => $"d.{c.Property}.Contains({Cs(c.Value)})"))})";
     }
 
     private static string FlaUiCondition(SelectorCondition c) => c.Property switch
@@ -196,6 +208,8 @@ public static partial class CodeTemplates
                     break;
             }
         }
+        // Compare receives each candidate control; Exists(0, 0) searches inside it once, without waiting.
+        if (step.Has is { } has) yield return $"Compare=lambda c, d: c.{ControlClass(has)}({string.Join(", ", UiaArgs(has))}).Exists(0, 0)";
         if (step.Index is { } index) yield return $"foundIndex={index + 1}"; // 1-based in uiautomation
     }
 
@@ -245,7 +259,20 @@ public static partial class CodeTemplates
                 _ => $"title={Py(c.Value)}",
             };
         }
+        if (step.Has is { } has) yield return $"predicate_func=lambda e: {PywinautoHas(has)}";
         if (step.Index is { } index) yield return $"found_index={index}";
+    }
+
+    // "Contains a descendant matching this step", as a Python expression on the element info `e`.
+    private static string PywinautoHas(SelectorStep has)
+    {
+        var filters = new List<string>();
+        if (has.ControlType is { } type) filters.Add($"control_type={Py(type)}");
+        if (has.Get(SelectorProperty.Name) is { Match: MatchKind.Exact } exact) filters.Add($"title={Py(exact.Value)}");
+        var descendants = $"e.descendants({string.Join(", ", filters)})";
+        return has.Get(SelectorProperty.Name) is { Match: MatchKind.Contains } partial
+            ? $"any({Py(partial.Value)} in d.name for d in {descendants})"
+            : $"len({descendants}) > 0";
     }
 
     // ------------------------------------------------------------------ Appium
@@ -299,7 +326,8 @@ public static partial class CodeTemplates
             .Select(c => c.Match == MatchKind.Contains
                 ? $"[contains(@{c.Property},{XPathLiteral(c.Value)})]"
                 : $"[@{c.Property}={XPathLiteral(c.Value)}]");
-        return (step.ControlType ?? "*") + string.Concat(predicates);
+        var has = step.Has is { } h ? $"[.//{XPathStep(h)}]" : "";
+        return (step.ControlType ?? "*") + string.Concat(predicates) + has;
     }
 
     private static string XPathLiteral(string value)
@@ -328,6 +356,7 @@ public static partial class CodeTemplates
         var type = step.ControlType ?? "Element";
         if (step.Get(SelectorProperty.AutomationId) is { } id) return $"{type} #{id.Value}";
         if (step.Get(SelectorProperty.Name) is { } name) return $"{type} '{name.Value}'";
+        if (step.Has?.Get(SelectorProperty.Name) is { } text) return $"{type} containing '{text.Value}'";
         return type;
     }
 

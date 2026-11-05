@@ -62,10 +62,16 @@ public sealed class StepBuilder(ClickSettings settings)
         return step.Id;
     }
 
+    /// <summary>
+    /// A mouse button went down somewhere that isn't recorded (the inspector, a title bar, the taskbar).
+    /// Its release must not be compared with the previous recorded click, which would look like a drag.
+    /// </summary>
+    public void IgnoreDown() => _lastDown = null;
+
     /// <summary>A mouse button was released. Returns true if the press turned out to be a drag, which isn't recorded.</summary>
-    public bool MouseUp(Point position)
+    public bool MouseUp(Point position, MouseButton button)
     {
-        if (_lastDown is not { } down) return false;
+        if (_lastDown is not { } down || down.Button != button) return false;
         var moved = Math.Abs(position.X - down.Position.X) > settings.DragThreshold.Width
                     || Math.Abs(position.Y - down.Position.Y) > settings.DragThreshold.Height;
         if (!moved) return false;

@@ -11,6 +11,12 @@ public enum WebLocatorKind
     Role,
 
     Css,
+
+    /// <summary><c>getByText(value, { exact: true })</c>: the element showing exactly this text.</summary>
+    Text,
+
+    /// <summary>An XPath relative to the previous step, e.g. <c>ancestor::div[1]</c> (the nearest div around it).</summary>
+    XPath,
 }
 
 /// <summary>One Playwright/Selenium locator step. <see cref="Index"/> (0-based) picks one of several matches.</summary>
@@ -46,6 +52,8 @@ public sealed record WebLocator
         {
             WebLocatorKind.Role => $"role={Role} name{(Exact ? "=" : "~")}\"{Name}\"",
             WebLocatorKind.TestId => $"{TestIdAttribute}=\"{Value}\"",
+            WebLocatorKind.Text => $"text=\"{Value}\"",
+            WebLocatorKind.XPath => $"xpath={Value}",
             _ => $"css={Value}",
         };
         return Index is { } index ? $"{text} #{index + 1}" : text;
@@ -77,6 +85,12 @@ public sealed record SeleniumSelector
     public IReadOnlyList<WebLocator> Frames { get; init; } = [];
 
     public IReadOnlyList<WebLocator> ShadowHosts { get; init; } = [];
+
+    /// <summary>
+    /// XPath (from the document) to a container told apart by text in it; <see cref="Target"/> is
+    /// then searched inside that container. Null for plain CSS selectors.
+    /// </summary>
+    public string? ContainerXPath { get; init; }
 
     public required WebLocator Target { get; init; }
 

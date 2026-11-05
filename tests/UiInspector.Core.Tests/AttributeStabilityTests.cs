@@ -4,6 +4,20 @@ namespace UiInspector.Core.Tests;
 
 public class AttributeStabilityTests
 {
+    [Fact]
+    public void LandmarkText_KeepsNumbers_BecauseTheyAreTheIdentity()
+    {
+        var order = AttributeStability.AnalyzeLandmarkText("Order 1042");
+        Assert.Equal("Order 1042", order.Value);
+        Assert.Equal(MatchKind.Exact, order.Match);
+        Assert.Contains("test data", order.Warning);
+
+        Assert.Equal(Stability.Stable, AttributeStability.AnalyzeLandmarkText("Invoices").Stability);
+        Assert.Equal("Dyno", AttributeStability.AnalyzeLandmarkText("Dyno, Online").Value); // status suffix dropped
+        Assert.False(AttributeStability.AnalyzeLandmarkText("3f2504e0-4f89-11d3-9a0c-0305e82c3301").IsUsable);
+        Assert.False(AttributeStability.AnalyzeLandmarkText(new string('x', 60)).IsUsable);
+    }
+
     [Theory]
     [InlineData("checkoutBtn")]
     [InlineData("num7Button")]       // Calculator

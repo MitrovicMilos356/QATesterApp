@@ -127,6 +127,29 @@ public class SelectorGeneratorIntegrationTests(SelectorFixtureWindow fixture) : 
         Assert.Contains(best.Warnings, w => w.Contains("position 3 of 3"));
     }
 
+    // The second order row: its panel has no ID or name, and all rows have the same Delete button.
+    private AutomationElement OrderRowDelete(AutomationElement window, string order)
+    {
+        var label = window.FindFirstDescendant(_automation.ConditionFactory.ByName(order))!;
+        var row = _automation.TreeWalkerFactory.GetControlViewWalker().GetParent(label);
+        return Buttons(row, "Delete").Single();
+    }
+
+    [Fact]
+    public void RowWithoutId_IsFoundByTheTextInIt_NotByPosition()
+    {
+        var result = GenerateFor(w => OrderRowDelete(w, "Order 1042"));
+
+        var best = result.Best!;
+        Assert.All(best.Steps, s => Assert.Null(s.Index));
+        Assert.Equal("ordersList", best.Steps[0].Get(SelectorProperty.AutomationId)?.Value);
+        Assert.Equal("Order 1042", best.Steps[1].Has?.Get(SelectorProperty.Name)?.Value);
+        Assert.Equal("Delete", best.Steps[2].Get(SelectorProperty.Name)?.Value);
+        Assert.Equal(VerificationStatus.Unique, best.Verification.Status);
+        Assert.Contains("containing \"Order 1042\"", best.Strategy);
+        Assert.DoesNotContain(best.Warnings, w => w.Contains("position"));
+    }
+
     [Fact]
     public void NameWithNumber_GetsAWarning()
     {
@@ -162,6 +185,7 @@ public class SelectorGeneratorIntegrationTests(SelectorFixtureWindow fixture) : 
             ("save_button", w => w.FindFirstDescendant(_automation.ConditionFactory.ByAutomationId("saveButton"))!),
             ("orders_delete", w => Buttons(Panel(w, "ordersPanel"), "Delete").Single()),
             ("third_action", w => Buttons(Panel(w, "toolsPanel"), "Action")[2]),
+            ("order_1042", w => OrderRowDelete(w, "Order 1042")),
         };
 
         var outDir = Path.Combine(AppContext.BaseDirectory, "generated");

@@ -118,6 +118,28 @@ public static partial class AttributeStability
         return new(Stability.Stable, trimmed, MatchKind.Exact, null);
     }
 
+    /// <summary>
+    /// Text that tells a container apart from its look-alikes ("Order 1042" in one of many rows).
+    /// Unlike <see cref="AnalyzeName"/>, numbers are kept: here they're usually the identity.
+    /// </summary>
+    public static AttributeVerdict AnalyzeLandmarkText(string name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return AttributeVerdict.Unusable(name, "No text.");
+        var trimmed = name.Trim();
+        if (trimmed.Length > MaxNameLength / 2 || trimmed.Contains('\n') || Guid().IsMatch(trimmed) || HashedToken().IsMatch(trimmed))
+        {
+            return AttributeVerdict.Unusable(name, "Too long or generated to identify a row by.");
+        }
+
+        var comma = trimmed.LastIndexOf(", ", StringComparison.Ordinal);
+        if (comma >= MinPrefixLength) trimmed = trimmed[..comma];
+        var match = comma >= MinPrefixLength ? MatchKind.Contains : MatchKind.Exact;
+
+        return trimmed.Any(char.IsDigit)
+            ? new(Stability.Weak, trimmed, match, $"Finds its container by the text \"{trimmed}\" in it, so the test depends on that data (fine when the test data is fixed).")
+            : new(Stability.Stable, trimmed, match, $"Finds its container by the text \"{trimmed}\" in it.");
+    }
+
     /// <summary>For window titles like "Untitled - Notepad" or "@GoAway - Discord": the app-name part.</summary>
     public static AttributeVerdict AnalyzeWindowTitle(string title)
     {

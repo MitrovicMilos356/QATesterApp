@@ -48,8 +48,16 @@ public sealed class EdgeWebFixture : IDisposable
         }, TimeSpan.FromSeconds(30)).Result;
         if (!ready)
         {
+            var window = FindWindow(automation);
+            var own = OwnProcessIds();
+            var titles = automation.GetDesktop().FindAllChildren()
+                .Where(w => own.Contains(w.Properties.ProcessId.ValueOrDefault))
+                .Select(w => $"\"{w.Properties.Name.ValueOrDefault}\"");
+            var why = window is null
+                ? $"no window titled \"{Title}\" from its own {own.Count} Edge processes (their windows: {string.Join(", ", titles)})"
+                : "its window appeared, but the page content (the Checkout button) never showed up in UI Automation";
             Dispose();
-            throw new InvalidOperationException("The Edge web fixture didn't appear.");
+            throw new InvalidOperationException($"The Edge web fixture didn't appear: {why}.");
         }
     }
 
@@ -225,6 +233,35 @@ public class WebBridgeIntegrationTests(EdgeWebFixture fixture) : IClassFixture<E
         var host = Assert.Single(web.Selenium!.ShadowHosts);
         Assert.Equal("fancy-card", host.Value);
         Assert.Equal("button.like", web.Selenium.Target.Value);
+    }
+
+    // A row with no id, hashed classes and the same button as its siblings: found through the
+    // order number in it, never by position.
+    [Fact]
+    public async Task RowWithoutId_IsFoundThroughTheTextInIt()
+    {
+        // Chromium may leave plain <div>s out of the UIA tree, so pick the Delete button on the label's line.
+        var web = await InspectAsync(w =>
+        {
+            if (ByName(w, ControlType.Text, "Order 1042") is not { } label) return null;
+            var y = label.BoundingRectangle.Y + label.BoundingRectangle.Height / 2;
+            return w.FindAllDescendants(_automation.ConditionFactory.ByControlType(ControlType.Button).And(_automation.ConditionFactory.ByName("Delete")))
+                .FirstOrDefault(b => Math.Abs(b.BoundingRectangle.Y + b.BoundingRectangle.Height / 2 - y) < 6);
+        });
+        Save("order_1042", web);
+
+        var best = web.Best!;
+        Assert.Equal(WebLocatorKind.Text, best.Steps[0].Kind);
+        Assert.Equal("Order 1042", best.Steps[0].Value);
+        Assert.Equal("ancestor::div[1]", best.Steps[1].Value);
+        Assert.Equal("Delete", best.Steps[2].Name);
+        Assert.All(best.Steps, s => Assert.Null(s.Index));
+        Assert.Equal(VerificationStatus.Unique, best.Verification.Status);
+
+        var selenium = web.Selenium!;
+        Assert.Contains("normalize-space(.)='Order 1042'", selenium.ContainerXPath);
+        Assert.Null(selenium.Target.Index);
+        Assert.DoesNotContain("5b7e2", selenium.Target.Value + selenium.ContainerXPath); // no hashed classes
     }
 
     [Fact]

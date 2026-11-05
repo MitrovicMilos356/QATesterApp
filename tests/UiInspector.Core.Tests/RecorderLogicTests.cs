@@ -190,7 +190,7 @@ public class StepBuilderTests
         var builder = new StepBuilder(Settings);
         var file = Fake.Path("ListItem", "report.txt");
         builder.AddClick(file, MouseButton.Left, new Point(10, 10), 1000);
-        builder.MouseUp(new Point(10, 10));
+        builder.MouseUp(new Point(10, 10), MouseButton.Left);
         Assert.Null(builder.AddClick(file, MouseButton.Left, new Point(11, 10), 1200));
 
         Assert.Equal(RecordedAction.DoubleClick, Assert.Single(builder.Steps).Action);
@@ -211,8 +211,32 @@ public class StepBuilderTests
     {
         var builder = new StepBuilder(Settings);
         builder.AddClick(Fake.Path("Thumb"), MouseButton.Left, new Point(10, 10), 1000);
-        Assert.True(builder.MouseUp(new Point(80, 10)));
+        Assert.True(builder.MouseUp(new Point(80, 10), MouseButton.Left));
         Assert.Empty(builder.Steps);
+    }
+
+    // Regression: clicking the inspector (to press Stop or just focus it) deleted the last step,
+    // because that click's release was compared with the previous recorded click and looked like a drag.
+    [Fact]
+    public void IgnoredClickElsewhere_DoesNotDeleteTheLastStep()
+    {
+        var builder = new StepBuilder(Settings);
+        builder.AddClick(Fake.Path("Button", "Save"), MouseButton.Left, new Point(10, 10), 1000);
+        builder.MouseUp(new Point(10, 10), MouseButton.Left);
+
+        builder.IgnoreDown(); // e.g. the inspector's Stop button, far away
+        Assert.False(builder.MouseUp(new Point(900, 600), MouseButton.Left));
+
+        Assert.Equal(RecordedAction.Click, Assert.Single(builder.Steps).Action);
+    }
+
+    [Fact]
+    public void ReleaseOfAnotherButton_IsNotADrag()
+    {
+        var builder = new StepBuilder(Settings);
+        builder.AddClick(Fake.Path("Button", "Save"), MouseButton.Left, new Point(10, 10), 1000);
+        Assert.False(builder.MouseUp(new Point(500, 500), MouseButton.Right));
+        Assert.Single(builder.Steps);
     }
 
     [Fact]
