@@ -1,5 +1,6 @@
 using UiInspector.Core;
 using UiInspector.Core.Selectors;
+using UiInspector.Core.Web;
 
 namespace UiInspector.Cli;
 
@@ -13,6 +14,7 @@ public static class SelectorOutput
         {
             var result = await service.GenerateSelectorAsync(path, ct);
             renderer.RenderSelector(result, result.Best is { } best ? CodeTemplates.Render(best, result) : []);
+            if (result.Web is { } web) renderer.RenderWeb(web, WebCodeTemplates.Render(web));
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {

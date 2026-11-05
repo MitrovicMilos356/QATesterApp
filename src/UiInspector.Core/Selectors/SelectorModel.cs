@@ -112,4 +112,7 @@ public sealed record SelectorResult
     public string ProcessName { get; init; } = "";
 
     public string? ProcessPath { get; init; }
+
+    /// <summary>Playwright/Selenium side for elements inside Chromium pages; null for native elements.</summary>
+    public Web.WebResult? Web { get; init; }
 }

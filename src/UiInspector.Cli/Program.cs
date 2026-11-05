@@ -24,7 +24,7 @@ if (options.Mode == CliMode.Help)
 
 var renderer = new ConsoleRenderer();
 using var worker = new UiaWorker(new UiaWorkerOptions { OperationTimeout = options.Timeout });
-var service = new InspectionService(worker, new ElementInspector());
+var service = new InspectionService(worker, new ElementInspector()) { CdpPort = options.CdpPort };
 
 return options.Mode switch
 {

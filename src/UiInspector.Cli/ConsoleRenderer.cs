@@ -1,6 +1,7 @@
 using System.Drawing;
 using UiInspector.Core;
 using UiInspector.Core.Selectors;
+using UiInspector.Core.Web;
 
 namespace UiInspector.Cli;
 
@@ -63,6 +64,61 @@ public sealed class ConsoleRenderer
             $"    Chromium/Electron apps build it only for assistive tools. Restart {app} with the\n" +
             "    --force-renderer-accessibility command-line switch, then inspect again.");
         Console.WriteLine();
+    }
+
+    public void RenderWeb(WebResult web, IReadOnlyList<CodeSnippet> snippets)
+    {
+        lock (_gate)
+        {
+            Console.WriteLine();
+            WriteColored(ConsoleColor.DarkCyan, "━━ Web page (Chrome DevTools Protocol) ━━");
+            Console.WriteLine();
+
+            if (!web.Connected)
+            {
+                WriteColored(ConsoleColor.Yellow, $"  {web.Problem}");
+                Console.WriteLine();
+                return;
+            }
+
+            Row("Page", $"{web.PageTitle}  ({web.PageUrl})  via port {web.Port}");
+            if (web.Element is { } element) Row("DOM element", element.Describe());
+            foreach (var note in web.Notes)
+            {
+                WriteColored(ConsoleColor.Yellow, $"  ⚠ {note}");
+                Console.WriteLine();
+            }
+
+            if (web.Best is { } best)
+            {
+                var ok = best.Verification.Status == VerificationStatus.Unique;
+                WriteColored(ok ? ConsoleColor.Green : ConsoleColor.Red, $"  {(ok ? "✔" : "✖")} Playwright: {best.Verification.Describe()}");
+                WriteColored(ConsoleColor.DarkGray, $"   Strategy: {best.Strategy}");
+                Console.WriteLine();
+                foreach (var frame in best.Frames) Row("Frame", frame.ToString());
+                foreach (var step in best.Steps) Row(step == best.Steps[^1] ? "Target" : "Inside", step.ToString());
+                foreach (var warning in best.Warnings)
+                {
+                    WriteColored(ConsoleColor.Yellow, $"  ⚠ {warning}");
+                    Console.WriteLine();
+                }
+            }
+            if (web.Selenium is { } selenium)
+            {
+                var ok = selenium.Verification.Status == VerificationStatus.Unique;
+                WriteColored(ok ? ConsoleColor.Green : ConsoleColor.Red, $"  {(ok ? "✔" : "✖")} Selenium: {selenium.Verification.Describe()}");
+                WriteColored(ConsoleColor.DarkGray, $"   CSS: {selenium.Target}");
+                Console.WriteLine();
+            }
+
+            foreach (var snippet in snippets)
+            {
+                Console.WriteLine();
+                WriteColored(ConsoleColor.DarkCyan, $"  ── {snippet.Title} ──");
+                Console.WriteLine();
+                foreach (var line in snippet.Code.TrimEnd().Split('\n')) Console.WriteLine("  " + line.TrimEnd('\r'));
+            }
+        }
     }
 
     public void RenderSelector(SelectorResult result, IReadOnlyList<CodeSnippet> snippets)

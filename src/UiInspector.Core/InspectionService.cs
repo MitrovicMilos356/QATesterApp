@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Drawing;
 using UiInspector.Core.Selectors;
+using UiInspector.Core.Web;
 
 namespace UiInspector.Core;
 
@@ -23,8 +24,14 @@ public sealed class InspectionService(UiaWorker worker, ElementInspector inspect
     // take a few seconds, well beyond a single inspection.
     private static readonly TimeSpan SelectorTimeout = TimeSpan.FromSeconds(20);
 
+    private static readonly TimeSpan WebTimeout = TimeSpan.FromSeconds(15);
+
     private readonly WebContentWaitOptions _waitOptions = waitOptions ?? new WebContentWaitOptions();
     private readonly SelectorGenerator _selectorGenerator = new(inspector);
+    private readonly WebBridge _webBridge = new();
+
+    /// <summary>Chromium remote-debugging port to use; null detects it from the app's command line.</summary>
+    public int? CdpPort { get; set; }
 
     /// <param name="onWaiting">Called once if the service starts waiting for web content.</param>
     public Task<InspectionResult?> InspectAtPointAsync(
@@ -54,9 +61,27 @@ public sealed class InspectionService(UiaWorker worker, ElementInspector inspect
     }
 
     /// <param name="pathFromRoot">Desktop first, then the top-level window, …, the element last.</param>
-    public Task<SelectorResult> GenerateSelectorAsync(IReadOnlyList<ElementInfo> pathFromRoot, CancellationToken cancellationToken = default)
+    public async Task<SelectorResult> GenerateSelectorAsync(IReadOnlyList<ElementInfo> pathFromRoot, CancellationToken cancellationToken = default)
     {
-        return worker.RunAsync(a => _selectorGenerator.Generate(a, pathFromRoot), cancellationToken, SelectorTimeout);
+        var result = await worker.RunAsync(a => _selectorGenerator.Generate(a, pathFromRoot), cancellationToken, SelectorTimeout);
+        if (pathFromRoot[^1].FrameworkId != "Chrome") return result;
+
+        // The web side talks to the page over CDP, not UIA, so it runs off the UIA worker.
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(WebTimeout);
+        try
+        {
+            return result with { Web = await _webBridge.InspectAsync(pathFromRoot, CdpPort, timeout.Token) };
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return result with { Web = WebResult.Unavailable($"The page didn't answer within {WebTimeout.TotalSeconds:0} s.") };
+        }
+        catch (Exception ex) when (ex is CdpException or System.Net.WebSockets.WebSocketException or System.Text.Json.JsonException
+                                       or System.Management.ManagementException or KeyNotFoundException or InvalidOperationException)
+        {
+            return result with { Web = WebResult.Unavailable($"Reading the page failed: {ex.Message}") };
+        }
     }
 
     public Task<ElementInfo> GetDesktopAsync(CancellationToken cancellationToken = default) =>

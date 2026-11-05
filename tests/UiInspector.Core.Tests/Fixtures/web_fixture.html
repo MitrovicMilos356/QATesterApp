@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UiInspector Web Fixture</title>
+<style>
+  body { font: 18px "Segoe UI", sans-serif; margin: 16px; }
+  section, nav { border: 1px solid #ccc; padding: 8px; margin: 8px 0; }
+  a { display: block; padding: 6px; }
+  .status__a91f3 { color: #666; font-size: 14px; }
+  iframe { width: 320px; height: 70px; border: 1px solid #999; }
+</style>
+</head>
+<body>
+<!--
+  Test fixture for the web bridge. Each case is something a locator generator must handle;
+  every action writes to #status so end-to-end checks can tell exactly which element was hit.
+-->
+<div id="status">Ready</div>
+
+<!-- A proper test id. -->
+<button data-testid="checkout" onclick="report('checkout clicked')">Checkout</button>
+
+<!-- Discord-like chat links: the accessible name carries a changing status. -->
+<nav aria-label="Direct Messages">
+  <a href="#dyno" aria-label="Dyno (direct message), Online" onclick="report('dyno opened'); return false;">
+    <span>Dyno</span><div class="status__a91f3">Playing Dungeon crawling</div>
+  </a>
+  <a href="#mee6" aria-label="MEE6 (direct message), Idle" onclick="report('mee6 opened'); return false;">
+    <span>MEE6</span><div class="status__a91f3">Listening to /help</div>
+  </a>
+</nav>
+
+<!-- The same caption twice, with CSS-module class names: needs the section as an anchor. -->
+<section aria-label="Orders"><button class="btn__972a0" onclick="report('orders delete clicked')">Delete</button></section>
+<section aria-label="Customers"><button class="btn__972a0" onclick="report('customers delete clicked')">Delete</button></section>
+
+<!-- A labelled input: role textbox, name from the label. -->
+<label for="email-input">Email</label> <input id="email-input" type="text" oninput="report('email: ' + this.value)">
+
+<!-- Same-origin iframe. -->
+<iframe id="payment-frame" title="Payment" srcdoc="<button onclick=&quot;parent.report('pay clicked')&quot;>Pay now</button>"></iframe>
+
+<!-- Open Shadow DOM. -->
+<fancy-card></fancy-card>
+
+<script>
+  function report(text) { document.getElementById('status').textContent = text; }
+  customElements.define('fancy-card', class extends HTMLElement {
+    constructor() {
+      super();
+      const root = this.attachShadow({ mode: 'open' });
+      root.innerHTML = '<div class="card"><button class="like" onclick="report(\'like clicked\')">Like</button></div>';
+    }
+  });
+</script>
+</body>
+</html>

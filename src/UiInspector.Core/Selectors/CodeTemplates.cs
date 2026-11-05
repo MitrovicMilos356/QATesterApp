@@ -3,7 +3,11 @@ using System.Text.RegularExpressions;
 
 namespace UiInspector.Core.Selectors;
 
-public sealed record CodeSnippet(string Id, string Title, string Code);
+public sealed record CodeSnippet(string Id, string Title, string Code)
+{
+    // UI lists and screen readers use ToString; the default record form would include all the code.
+    public override string ToString() => Title;
+}
 
 /// <summary>What the generated code does with the element once found.</summary>
 public enum ElementAction

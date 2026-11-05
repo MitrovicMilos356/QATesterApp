@@ -17,6 +17,7 @@ public sealed record CliOptions
     public Point Point { get; init; }
     public bool IncludeAncestors { get; init; } = true;
     public bool Code { get; init; }
+    public int? CdpPort { get; init; }
     public TimeSpan Timeout { get; init; } = TimeSpan.FromSeconds(5);
     public TimeSpan Delay { get; init; } = TimeSpan.FromSeconds(3);
 
@@ -30,6 +31,7 @@ public sealed record CliOptions
 
         Options:
           --code                        Also generate a verified selector and code (FlaUI, uiautomation, pywinauto, Appium)
+          --cdp-port N                  Chromium debugging port for web elements (default: read from the app's command line)
           --no-ancestors                Don't walk and print the ancestor chain (not combinable with --code)
           --timeout MS                  Abandon an inspection after MS milliseconds (default 5000)
           --delay MS                    Countdown for the delayed-capture hotkey (default 3000)
@@ -57,6 +59,7 @@ public sealed record CliOptions
                 "--focused" => options with { Mode = CliMode.Focused },
                 "--no-ancestors" => options with { IncludeAncestors = false },
                 "--code" => options with { Code = true },
+                "--cdp-port" => options with { CdpPort = Int(args, ++i, "--cdp-port") },
                 "--timeout" => options with { Timeout = Milliseconds(args, ++i, "--timeout") },
                 "--delay" => options with { Delay = Milliseconds(args, ++i, "--delay") },
                 var unknown => throw new ArgumentException($"Unknown argument '{unknown}'."),

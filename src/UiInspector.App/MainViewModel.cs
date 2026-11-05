@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using UiInspector.Core;
 using UiInspector.Core.Selectors;
+using UiInspector.Core.Web;
 using DrawingPoint = System.Drawing.Point;
 
 namespace UiInspector.App;
@@ -11,7 +12,11 @@ namespace UiInspector.App;
 public sealed record PropertyRow(string Name, string Value);
 
 /// <summary>One selector the user can choose in the Selector tab (the best one or an alternative).</summary>
-public sealed record SelectorChoice(Selector Selector, string Label);
+public sealed record SelectorChoice(Selector Selector, string Label)
+{
+    // What the drop-down and screen readers announce, instead of the whole record.
+    public override string ToString() => Label;
+}
 
 /// <summary>
 /// State and behaviour of the inspector window: picking (live Ctrl-hover and hotkeys), smart
@@ -121,6 +126,23 @@ public sealed partial class MainViewModel : ObservableObject
 
     [ObservableProperty]
     private bool _hasAlternatives;
+
+    /// <summary>What the CDP web bridge found (or why it couldn't), shown for elements in Chromium pages.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasWebSummary))]
+    private string _webSummary = "";
+
+    [ObservableProperty]
+    private bool _webIsWarning;
+
+    public bool HasWebSummary => WebSummary.Length > 0;
+
+    /// <summary>Debug port typed by the user; empty means "detect from the app's command line".</summary>
+    [ObservableProperty]
+    private string _cdpPortText = "";
+
+    partial void OnCdpPortTextChanged(string value) =>
+        _service.CdpPort = int.TryParse(value, out var port) && port is > 0 and < 65536 ? port : null;
 
     // ---------------------------------------------------------------- picking
 
@@ -377,6 +399,7 @@ public sealed partial class MainViewModel : ObservableObject
         Snippets.Clear();
         SelectorSteps = "";
         OcclusionText = "";
+        WebSummary = "";
         HasAlternatives = false;
         SelectorTone = "busy";
         SelectorHeadline = "Generating a selector and verifying it against the live app…";
@@ -406,6 +429,7 @@ public sealed partial class MainViewModel : ObservableObject
             OcclusionText = $"Click check: {occlusion.Message}";
             OcclusionIsWarning = occlusion.IsCovered;
         }
+        ShowWebSummary(result.Web);
 
         if (result.Best is not { } best)
         {
@@ -444,7 +468,38 @@ public sealed partial class MainViewModel : ObservableObject
         var keep = _preferredSnippetId;
         Snippets.Clear();
         foreach (var snippet in CodeTemplates.Render(selector, _selectorResult)) Snippets.Add(snippet);
+        if (_selectorResult.Web is { } web)
+        {
+            foreach (var snippet in WebCodeTemplates.Render(web)) Snippets.Add(snippet);
+        }
         SelectedSnippet = Snippets.FirstOrDefault(s => s.Id == keep) ?? Snippets.FirstOrDefault();
+    }
+
+    private void ShowWebSummary(WebResult? web)
+    {
+        if (web is null)
+        {
+            WebSummary = "";
+            return;
+        }
+        if (!web.Connected)
+        {
+            WebIsWarning = true;
+            WebSummary = $"Web page: {web.Problem}";
+            return;
+        }
+
+        var lines = new List<string> { $"Web page: {web.PageTitle} (port {web.Port})" };
+        if (web.Element is { } element) lines.Add($"DOM element: {element.Describe()}");
+        lines.Add(web.Best is { } best
+            ? $"Playwright: {best.Verification.Describe()} Strategy: {best.Strategy}  →  {string.Join(" › ", best.Frames.Concat(best.Steps))}"
+            : "Playwright: no verified locator.");
+        if (web.Selenium is { } selenium) lines.Add($"Selenium: {selenium.Verification.Describe()} CSS: {selenium.Target}");
+        lines.AddRange(web.Notes.Concat(web.Best?.Warnings ?? []).Distinct().Select(n => $"⚠ {n}"));
+        lines.Add("Pick Playwright or Selenium in the language list below.");
+
+        WebIsWarning = web.Best is null;
+        WebSummary = string.Join(Environment.NewLine, lines);
     }
 
     partial void OnSelectedSnippetChanged(CodeSnippet? value)
