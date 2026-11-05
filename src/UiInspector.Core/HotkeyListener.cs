@@ -10,6 +10,8 @@ public enum HotkeyCommand
     InspectFocused,
     InspectDelayed,
     ToggleHover,
+    AddCheck,
+    ToggleRecording,
 }
 
 public sealed record Hotkey(HotkeyCommand Command, string Display, uint Modifiers, uint VirtualKey);
@@ -23,7 +25,7 @@ public sealed class HotkeyListener : IDisposable
     private const uint MOD_CONTROL = 0x0002;
     private const uint MOD_SHIFT = 0x0004;
     private const uint MOD_NOREPEAT = 0x4000;
-    private const uint VK_F9 = 0x78, VK_F10 = 0x79, VK_F11 = 0x7A, VK_F12 = 0x7B;
+    private const uint VK_F7 = 0x76, VK_F8 = 0x77, VK_F9 = 0x78, VK_F10 = 0x79, VK_F11 = 0x7A, VK_F12 = 0x7B;
     private const uint WM_HOTKEY = 0x0312;
     private const uint WM_QUIT = 0x0012;
     private const uint PM_NOREMOVE = 0x0000;
@@ -34,6 +36,8 @@ public sealed class HotkeyListener : IDisposable
         new(HotkeyCommand.InspectFocused, "Ctrl+Shift+F10", MOD_CONTROL | MOD_SHIFT, VK_F10),
         new(HotkeyCommand.InspectDelayed, "Ctrl+Shift+F11", MOD_CONTROL | MOD_SHIFT, VK_F11),
         new(HotkeyCommand.ToggleHover, "Ctrl+Shift+F12", MOD_CONTROL | MOD_SHIFT, VK_F12),
+        new(HotkeyCommand.AddCheck, "Ctrl+Shift+F7", MOD_CONTROL | MOD_SHIFT, VK_F7),
+        new(HotkeyCommand.ToggleRecording, "Ctrl+Shift+F8", MOD_CONTROL | MOD_SHIFT, VK_F8),
     ];
 
     private readonly Channel<HotkeyCommand> _commands = Channel.CreateUnbounded<HotkeyCommand>();

@@ -20,7 +20,10 @@ public sealed class SelectorGenerator(ElementInspector inspector)
     private const int IndexPenalty = 45;
     private const int MaxParentWalk = 40;
 
-    private const string LanguageWarning = "Names follow the app's UI language; this part breaks if the app runs in another language.";
+    internal const string LanguageWarning = "Names follow the app's UI language; this part breaks if the app runs in another language.";
+
+    internal const string UnverifiedWarning =
+        "Not verified: the element was gone (e.g. its dialog closed) before the selector could be checked, so it may match more than one element.";
 
     public SelectorResult Generate(AutomationBase automation, IReadOnlyList<ElementInfo> pathFromRoot)
     {
@@ -98,6 +101,53 @@ public sealed class SelectorGenerator(ElementInspector inspector)
             Alternatives = ranked.Skip(1).ToList(),
             Occlusion = occlusion,
             Problem = ranked.Count == 0 ? "No selector could be verified for this element." : null,
+        };
+    }
+
+    /// <summary>
+    /// A selector built from the snapshot alone, for elements that are gone by the time they could
+    /// be checked (e.g. a dialog button whose click closed the dialog). It follows the same
+    /// preferences, and scopes weaker matches to the nearest ancestor with a stable AutomationId.
+    /// Needs no UIA calls.
+    /// </summary>
+    public static Selector? BuildUnverified(IReadOnlyList<ElementInfo> pathFromRoot)
+    {
+        if (pathFromRoot.Count < 2) return null;
+        var windowStep = BuildWindowStep(pathFromRoot[1], out var warnings);
+        var verification = new SelectorVerification(VerificationStatus.Unverified, 0);
+        warnings.Add(UnverifiedWarning);
+
+        if (pathFromRoot.Count == 2)
+        {
+            return new Selector { Window = windowStep, Steps = [], Strategy = "Top-level window (unverified)", Score = 0, Verification = verification, Warnings = warnings };
+        }
+
+        var candidate = Candidates(pathFromRoot[^1], isTarget: true).FirstOrDefault();
+        if (candidate is null) return null;
+
+        var steps = new List<SelectorStep>();
+        var strategy = candidate.Strategy;
+        if (candidate.Score < 100)
+        {
+            var anchor = pathFromRoot.Skip(2).Take(pathFromRoot.Count - 3).Reverse()
+                .Select(a => Candidates(a, isTarget: false).FirstOrDefault(c => c.Strategy == "AutomationId" && c.Score == 100))
+                .FirstOrDefault(c => c is not null);
+            if (anchor is not null)
+            {
+                steps.Add(anchor.Step);
+                strategy += $" inside {Describe(anchor.Step)}";
+            }
+        }
+        steps.Add(candidate.Step);
+
+        return new Selector
+        {
+            Window = windowStep,
+            Steps = steps,
+            Strategy = strategy + " (unverified)",
+            Score = 0,
+            Verification = verification,
+            Warnings = warnings.Concat(candidate.Warnings.OfType<string>()).Distinct().ToList(),
         };
     }
 

@@ -38,10 +38,31 @@ public sealed partial class MainViewModel : ObservableObject
     private bool _hoverBusy;
     private InspectionResult? _hoverResult;
 
-    public MainViewModel(InspectionService service, IHighlighter highlighter)
+    private bool _livePickBeforeRecording;
+
+    public MainViewModel(InspectionService service, IHighlighter highlighter, RecorderViewModel recorder)
     {
         _service = service;
         _highlighter = highlighter;
+        Recorder = recorder;
+        recorder.RecordingChanged += OnRecordingChanged;
+    }
+
+    public RecorderViewModel Recorder { get; }
+
+    // Holding Ctrl for shortcuts like Ctrl+S would otherwise pick elements while recording.
+    private void OnRecordingChanged(bool recording)
+    {
+        if (recording)
+        {
+            _livePickBeforeRecording = LivePickEnabled;
+            LivePickEnabled = false;
+            ResetHover();
+        }
+        else
+        {
+            LivePickEnabled = _livePickBeforeRecording;
+        }
     }
 
     public ObservableCollection<TreeNodeViewModel> RootNodes { get; } = [];
@@ -221,6 +242,13 @@ public sealed partial class MainViewModel : ObservableObject
             case HotkeyCommand.ToggleHover:
                 LivePickEnabled = !LivePickEnabled;
                 Status = LivePickEnabled ? "Live pick on: hold Ctrl and hover." : "Live pick off.";
+                break;
+            case HotkeyCommand.ToggleRecording:
+                await Recorder.ToggleRecordingAsync();
+                break;
+            case HotkeyCommand.AddCheck:
+                if (Recorder.IsRecording) await Recorder.AddCheckAtCursorAsync();
+                else Status = "Checks are added while recording: press Ctrl+Shift+F8 to start.";
                 break;
         }
     }

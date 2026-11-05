@@ -20,6 +20,9 @@ public enum ElementAction
     Expand,
     SetValue,
     Click,
+
+    /// <summary>Give the element keyboard focus (a recorded click into a text field that wasn't typed into).</summary>
+    Focus,
 }
 
 /// <summary>
@@ -31,7 +34,7 @@ public enum ElementAction
 public static partial class CodeTemplates
 {
     private const string SampleText = "Hello from UiInspector";
-    private const int WaitSeconds = 10;
+    internal const int WaitSeconds = 10;
 
     public static IReadOnlyList<CodeSnippet> Render(Selector selector, SelectorResult result)
     {
@@ -48,6 +51,8 @@ public static partial class CodeTemplates
     public static ElementAction ChooseAction(ElementInfo target)
     {
         var p = target.Patterns;
+        // WinForms check boxes also offer Invoke (a click); Toggle says what the step does.
+        if (target.ControlType is "CheckBox" && p.Contains("Toggle")) return ElementAction.Toggle;
         if (p.Contains("Invoke")) return ElementAction.Invoke;
         if (p.Contains("Toggle")) return ElementAction.Toggle;
         if (p.Contains("SelectionItem")) return ElementAction.Select;
@@ -89,20 +94,25 @@ public static partial class CodeTemplates
         }
 
         sb.AppendLine();
-        sb.AppendLine(action switch
-        {
-            ElementAction.None => "Console.WriteLine($\"Found window: {window.Name}\");",
-            ElementAction.Invoke => "target.Patterns.Invoke.Pattern.Invoke();",
-            ElementAction.Toggle => "target.Patterns.Toggle.Pattern.Toggle();",
-            ElementAction.Select => "target.Patterns.SelectionItem.Pattern.Select();",
-            ElementAction.Expand => "target.Patterns.ExpandCollapse.Pattern.Expand();",
-            ElementAction.SetValue => $"target.Patterns.Value.Pattern.SetValue({Cs(SampleText)});",
-            _ => "target.Click(); // no pattern action available; this moves the real mouse",
-        });
+        sb.AppendLine(action == ElementAction.None
+            ? "Console.WriteLine($\"Found window: {window.Name}\");"
+            : FlaUiAction(action, Cs(SampleText)));
         return sb.ToString();
     }
 
-    private static string FlaUiFind(string scope, SelectorStep step, bool children)
+    /// <param name="value">C# expression for the text (SetValue only).</param>
+    internal static string FlaUiAction(ElementAction action, string value) => action switch
+    {
+        ElementAction.Invoke => "target.Patterns.Invoke.Pattern.Invoke();",
+        ElementAction.Toggle => "target.Patterns.Toggle.Pattern.Toggle();",
+        ElementAction.Select => "target.Patterns.SelectionItem.Pattern.Select();",
+        ElementAction.Expand => "target.Patterns.ExpandCollapse.Pattern.Expand();",
+        ElementAction.SetValue => $"target.Patterns.Value.Pattern.SetValue({value});",
+        ElementAction.Focus => "target.Focus();",
+        _ => "target.Click(); // no pattern action available; this moves the real mouse",
+    };
+
+    internal static string FlaUiFind(string scope, SelectorStep step, bool children)
     {
         var exact = step.Conditions.Where(c => c.Match == MatchKind.Exact).Select(FlaUiCondition).ToList();
         var condition = exact.Count == 0
@@ -153,22 +163,27 @@ public static partial class CodeTemplates
         var last = s.Steps.Count == 0 ? "window" : "target";
         sb.AppendLine($"if not {last}.Exists(maxSearchSeconds={WaitSeconds}):");
         sb.AppendLine($"    raise LookupError({Py(StepLabel(s.Steps.Count == 0 ? s.Window : s.Steps[^1]) + " not found")})");
-        sb.AppendLine(action switch
-        {
-            ElementAction.None => "print('Found window:', window.Name)",
-            ElementAction.Invoke => "target.GetInvokePattern().Invoke()",
-            ElementAction.Toggle => "target.GetTogglePattern().Toggle()",
-            ElementAction.Select => "target.GetSelectionItemPattern().Select()",
-            ElementAction.Expand => "target.GetExpandCollapsePattern().Expand()",
-            ElementAction.SetValue => $"target.GetValuePattern().SetValue({Py(SampleText)})",
-            _ => "target.Click()  # no pattern action available; this moves the real mouse",
-        });
+        sb.AppendLine(action == ElementAction.None
+            ? "print('Found window:', window.Name)"
+            : UiaAction(action, Py(SampleText)));
         return sb.ToString();
     }
 
-    private static string ControlClass(SelectorStep step) => (step.ControlType ?? "") + "Control";
+    /// <param name="value">Python expression for the text (SetValue only).</param>
+    internal static string UiaAction(ElementAction action, string value) => action switch
+    {
+        ElementAction.Invoke => "target.GetInvokePattern().Invoke()",
+        ElementAction.Toggle => "target.GetTogglePattern().Toggle()",
+        ElementAction.Select => "target.GetSelectionItemPattern().Select()",
+        ElementAction.Expand => "target.GetExpandCollapsePattern().Expand()",
+        ElementAction.SetValue => $"target.GetValuePattern().SetValue({value})",
+        ElementAction.Focus => "target.SetFocus()",
+        _ => "target.Click()  # no pattern action available; this moves the real mouse",
+    };
 
-    private static IEnumerable<string> UiaArgs(SelectorStep step)
+    internal static string ControlClass(SelectorStep step) => (step.ControlType ?? "") + "Control";
+
+    internal static IEnumerable<string> UiaArgs(SelectorStep step)
     {
         foreach (var c in step.Conditions)
         {
@@ -199,20 +214,25 @@ public static partial class CodeTemplates
         foreach (var step in s.Steps) spec += $".child_window({string.Join(", ", PywinautoArgs(step))})";
         var last = s.Steps.Count == 0 ? "window" : "target";
         sb.AppendLine($"{last} = {spec}.wait(\"exists\", timeout={WaitSeconds})");
-        sb.AppendLine(action switch
-        {
-            ElementAction.None => "print(\"Found window:\", window.window_text())",
-            ElementAction.Invoke => "target.iface_invoke.Invoke()",
-            ElementAction.Toggle => "target.iface_toggle.Toggle()",
-            ElementAction.Select => "target.iface_selection_item.Select()",
-            ElementAction.Expand => "target.iface_expand_collapse.Expand()",
-            ElementAction.SetValue => $"target.iface_value.SetValue({Py(SampleText)})",
-            _ => "target.click_input()  # no pattern action available; this moves the real mouse",
-        });
+        sb.AppendLine(action == ElementAction.None
+            ? "print(\"Found window:\", window.window_text())"
+            : PywinautoAction(action, Py(SampleText)));
         return sb.ToString();
     }
 
-    private static IEnumerable<string> PywinautoArgs(SelectorStep step)
+    /// <param name="value">Python expression for the text (SetValue only).</param>
+    internal static string PywinautoAction(ElementAction action, string value) => action switch
+    {
+        ElementAction.Invoke => "target.iface_invoke.Invoke()",
+        ElementAction.Toggle => "target.iface_toggle.Toggle()",
+        ElementAction.Select => "target.iface_selection_item.Select()",
+        ElementAction.Expand => "target.iface_expand_collapse.Expand()",
+        ElementAction.SetValue => $"target.iface_value.SetValue({value})",
+        ElementAction.Focus => "target.set_focus()",
+        _ => "target.click_input()  # no pattern action available; this moves the real mouse",
+    };
+
+    internal static IEnumerable<string> PywinautoArgs(SelectorStep step)
     {
         foreach (var c in step.Conditions)
         {
@@ -258,16 +278,21 @@ public static partial class CodeTemplates
             scope = name;
         }
 
-        sb.AppendLine(action switch
-        {
-            ElementAction.None => "print(\"Found window:\", window.get_attribute(\"Name\"))",
-            ElementAction.SetValue => $"target.send_keys({Py(SampleText)})",
-            _ => "target.click()",
-        });
+        sb.AppendLine(action == ElementAction.None
+            ? "print(\"Found window:\", window.get_attribute(\"Name\"))"
+            : AppiumAction(action, Py(SampleText)));
         return sb.ToString();
     }
 
-    private static string XPathStep(SelectorStep step)
+    /// <param name="value">Python expression for the text (SetValue only).</param>
+    internal static string AppiumAction(ElementAction action, string value) => action switch
+    {
+        ElementAction.SetValue => $"target.clear()\ntarget.send_keys({value})",
+        ElementAction.Focus => "target.click()  # gives it focus",
+        _ => "target.click()",
+    };
+
+    internal static string XPathStep(SelectorStep step)
     {
         var predicates = step.Conditions
             .Where(c => c.Property != SelectorProperty.ControlType)
@@ -295,10 +320,10 @@ public static partial class CodeTemplates
         sb.AppendLine();
     }
 
-    private static string Describe(ElementInfo e) =>
+    internal static string Describe(ElementInfo e) =>
         $"{(string.IsNullOrEmpty(e.ControlType) ? "?" : e.ControlType)} {(string.IsNullOrEmpty(e.Name) ? "(no name)" : $"\"{OneLine(e.Name)}\"")}";
 
-    private static string StepLabel(SelectorStep step)
+    internal static string StepLabel(SelectorStep step)
     {
         var type = step.ControlType ?? "Element";
         if (step.Get(SelectorProperty.AutomationId) is { } id) return $"{type} #{id.Value}";
@@ -306,14 +331,14 @@ public static partial class CodeTemplates
         return type;
     }
 
-    private static string OneLine(string text) => NewLines().Replace(text, " ");
+    internal static string OneLine(string text) => NewLines().Replace(text, " ");
 
-    private static string Cs(string value) => "\"" + CsEscape(value) + "\"";
+    internal static string Cs(string value) => "\"" + CsEscape(value) + "\"";
 
-    private static string CsEscape(string value) =>
+    internal static string CsEscape(string value) =>
         value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", "\\r").Replace("\n", "\\n");
 
-    private static string Py(string value) =>
+    internal static string Py(string value) =>
         "'" + value.Replace("\\", "\\\\").Replace("'", "\\'").Replace("\r", "\\r").Replace("\n", "\\n") + "'";
 
     [GeneratedRegex(@"\s*[\r\n]+\s*")]

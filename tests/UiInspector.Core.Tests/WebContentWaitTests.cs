@@ -38,13 +38,15 @@ public class WebContentWaitTests
         var attempts = 0;
         var waitedCount = 0;
 
+        // A generous timeout: with the desktop tests running in parallel, two 10 ms delays can take long.
+        var options = new WebContentWaitOptions { Timeout = TimeSpan.FromSeconds(10), PollInterval = TimeSpan.FromMilliseconds(10) };
         var result = await InspectionService.WaitForWebContentAsync(
             _ =>
             {
                 attempts++;
                 return Task.FromResult<InspectionResult?>(attempts < 3 ? Result(pending: true) : Result(pending: false, "Dyno"));
             },
-            FastOptions, () => waitedCount++, CancellationToken.None);
+            options, () => waitedCount++, CancellationToken.None);
 
         Assert.Equal("Dyno", result?.Element.Name);
         Assert.False(result?.WebContentPending);

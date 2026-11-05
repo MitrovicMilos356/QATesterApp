@@ -18,6 +18,8 @@ public sealed class ConsoleRenderer
 
     public void Error(string message) => Write(ConsoleColor.Red, message);
 
+    public void Success(string message) => Write(ConsoleColor.Green, message);
+
     public void WaitingForWebContent() =>
         Write(ConsoleColor.DarkGray, "Web page is still building its accessibility tree, waiting…");
 

@@ -2,7 +2,7 @@
 # must handle. It opens off-screen (no monitor there) so tests never cover the user's screen;
 # UI Automation reads it the same either way. Clicking Save sets the status label to "Saved",
 # which lets an end-to-end check prove that generated code really acted on the right button.
-param([int]$X = -3000, [int]$Y = -3000)
+param([int]$X = -3000, [int]$Y = -3000, [string]$Title = 'UiInspector Selector Fixture', [string]$FormName = 'SelectorFixtureForm')
 
 Add-Type -AssemblyName System.Windows.Forms
 
@@ -20,11 +20,11 @@ function New-Panel([string]$name, [int]$x, [int]$y, [int]$w, [int]$h) {
 }
 
 $form = New-Object System.Windows.Forms.Form
-$form.Text = 'UiInspector Selector Fixture'
-$form.Name = 'SelectorFixtureForm'
+$form.Text = $Title
+$form.Name = $FormName
 $form.StartPosition = 'Manual'
 $form.Location = New-Object System.Drawing.Point($X, $Y)
-$form.Size = New-Object System.Drawing.Size(540, 380)
+$form.Size = New-Object System.Drawing.Size(540, 420)
 $form.ShowInTaskbar = $false
 
 $status = New-Object System.Windows.Forms.Label
@@ -55,5 +55,16 @@ foreach ($i in 0..2) { $tools.Controls.Add((Add-Reporter (New-Button 'Action' ''
 $notes = New-Object System.Windows.Forms.TextBox
 $notes.Name = 'notesBox'; $notes.Location = New-Object System.Drawing.Point(10, 280); $notes.Width = 300
 
-$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes))
+# For the recorder: a checkbox (Toggle) and a password field. A password can't be read through
+# UI Automation, so a label reports its length for end-to-end checks.
+$remember = New-Object System.Windows.Forms.CheckBox
+$remember.Name = 'rememberBox'; $remember.Text = 'Remember me'; $remember.Location = New-Object System.Drawing.Point(10, 315); $remember.AutoSize = $true
+
+$password = New-Object System.Windows.Forms.TextBox
+$password.Name = 'passwordBox'; $password.UseSystemPasswordChar = $true; $password.Location = New-Object System.Drawing.Point(320, 280); $password.Width = 190
+$passwordInfo = New-Object System.Windows.Forms.Label
+$passwordInfo.Name = 'passwordInfo'; $passwordInfo.Text = 'Password length 0'; $passwordInfo.Location = New-Object System.Drawing.Point(320, 315); $passwordInfo.AutoSize = $true
+$password.Add_TextChanged({ $passwordInfo.Text = "Password length $($password.Text.Length)" })
+
+$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes, $remember, $password, $passwordInfo))
 [System.Windows.Forms.Application]::Run($form)

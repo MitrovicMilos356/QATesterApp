@@ -24,7 +24,8 @@ if (options.Mode == CliMode.Help)
 
 var renderer = new ConsoleRenderer();
 using var worker = new UiaWorker(new UiaWorkerOptions { OperationTimeout = options.Timeout });
-var service = new InspectionService(worker, new ElementInspector()) { CdpPort = options.CdpPort };
+var inspector = new ElementInspector();
+var service = new InspectionService(worker, inspector) { CdpPort = options.CdpPort };
 
 return options.Mode switch
 {
@@ -34,7 +35,7 @@ return options.Mode switch
     CliMode.Focused => await RunOnceAsync(
         () => service.InspectFocusedAsync(options.IncludeAncestors, onWaiting: renderer.WaitingForWebContent),
         null),
-    _ => await new InteractiveSession(service, renderer, options).RunAsync(),
+    _ => await new InteractiveSession(service, inspector, renderer, options).RunAsync(),
 };
 
 async Task<int> RunOnceAsync(Func<Task<InspectionResult?>> inspect, System.Drawing.Point? point)

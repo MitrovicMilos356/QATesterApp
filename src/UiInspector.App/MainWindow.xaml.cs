@@ -2,6 +2,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Threading;
 using UiInspector.Core;
+using UiInspector.Core.Recording;
 
 namespace UiInspector.App;
 
@@ -14,13 +15,17 @@ public partial class MainWindow : Window
     private readonly HotkeyListener _hotkeys = new();
     private readonly DispatcherTimer _pickTimer;
     private readonly MainViewModel _viewModel;
+    private readonly Recorder _recorder;
     private bool _tickRunning;
 
     public MainWindow()
     {
         InitializeComponent();
 
-        _viewModel = new MainViewModel(new InspectionService(_worker, new ElementInspector()), _overlay);
+        var inspector = new ElementInspector();
+        var service = new InspectionService(_worker, inspector);
+        _recorder = new Recorder(service, inspector);
+        _viewModel = new MainViewModel(service, _overlay, new RecorderViewModel(_recorder, _overlay, Dispatcher));
         DataContext = _viewModel;
 
         _pickTimer = new DispatcherTimer(PickInterval, DispatcherPriority.Input, OnPickTimer, Dispatcher);
@@ -100,6 +105,9 @@ public partial class MainWindow : Window
     {
         _pickTimer.Stop();
         _hotkeys.Dispose();
+        // Removes the input hook first thing; the rest only waits briefly for background work.
+        // (On the thread pool: its awaits would otherwise need this blocked UI thread.)
+        Task.Run(() => _recorder.DisposeAsync().AsTask()).Wait(TimeSpan.FromSeconds(3));
         _overlay.Close();
         _worker.Dispose();
     }

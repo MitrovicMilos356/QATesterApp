@@ -61,10 +61,12 @@ public sealed class InspectionService(UiaWorker worker, ElementInspector inspect
     }
 
     /// <param name="pathFromRoot">Desktop first, then the top-level window, …, the element last.</param>
-    public async Task<SelectorResult> GenerateSelectorAsync(IReadOnlyList<ElementInfo> pathFromRoot, CancellationToken cancellationToken = default)
+    /// <param name="includeWeb">Also read Chromium pages over CDP for Playwright/Selenium locators.</param>
+    public async Task<SelectorResult> GenerateSelectorAsync(
+        IReadOnlyList<ElementInfo> pathFromRoot, CancellationToken cancellationToken = default, bool includeWeb = true)
     {
         var result = await worker.RunAsync(a => _selectorGenerator.Generate(a, pathFromRoot), cancellationToken, SelectorTimeout);
-        if (pathFromRoot[^1].FrameworkId != "Chrome") return result;
+        if (!includeWeb || pathFromRoot[^1].FrameworkId != "Chrome") return result;
 
         // The web side talks to the page over CDP, not UIA, so it runs off the UIA worker.
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);

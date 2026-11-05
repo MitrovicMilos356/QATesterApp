@@ -56,6 +56,9 @@ public enum VerificationStatus
 
     /// <summary>Exactly one element matches, but it's a different one.</summary>
     WrongElement,
+
+    /// <summary>Built from a snapshot after the element was gone, so it couldn't be checked.</summary>
+    Unverified,
 }
 
 public sealed record SelectorVerification(VerificationStatus Status, int MatchCount)
@@ -66,6 +69,7 @@ public sealed record SelectorVerification(VerificationStatus Status, int MatchCo
         VerificationStatus.Ambiguous => $"Ambiguous: {MatchCount} elements match.",
         VerificationStatus.NotFound => "Broken: nothing matches anymore.",
         VerificationStatus.WrongElement => "Broken: it matches a different element.",
+        VerificationStatus.Unverified => "Not verified: the element was gone before it could be checked.",
         _ => Status.ToString(),
     };
 }

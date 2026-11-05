@@ -4,7 +4,8 @@ Reads any Windows app's UI through UI Automation (UIA) and shows each element's 
 patterns and position in the UI tree, then generates a **verified selector** and ready-to-paste
 code for FlaUI (C#), Python `uiautomation`, pywinauto and Appium. For elements inside Chromium
 pages (Electron, WebView2, Chrome, Edge) it also generates **Playwright** (JS, Python, C#) and
-**Selenium** (Python, Java) code from the real DOM. This covers Phases 1–4 of
+**Selenium** (Python, Java) code from the real DOM. A **recorder** turns a workflow you click
+through into a complete script. This covers Phases 1–4 and the recorder from Phase 5 of
 [windows_ui_inspector_spec.md](windows_ui_inspector_spec.md): a desktop GUI and a console tool
 that share one engine.
 
@@ -88,6 +89,43 @@ Limits: elements inside **cross-origin iframes** (e.g. payment providers) can be
 read yet; use the native selector for them. Electron apps need a chromedriver that matches the
 app's Chromium version for Selenium.
 
+### Recorder: click through a workflow, get a script
+
+Open the **Recorder** tab and press **● Record** (or `Ctrl+Shift+F8` from any app), then use the app
+you want to test. Each action becomes a step with a verified selector:
+
+| You do | Step in the script |
+| :--- | :--- |
+| Click a button, link, menu item, tab… | Its pattern action: `Invoke`, `Toggle` (check boxes), `Select` (list items, tabs), `Expand` |
+| Click a control without one | A mouse click (marked "moves the real mouse") |
+| Double-click, right-click | A mouse double-click / right-click |
+| Type into a field | `SetValue` with the field's final text (the click into the field is dropped) |
+| Type into an editor without a settable value (rich text, web editors) | The text typed as keys |
+| Type a password | `SetValue` from an environment variable (`UIINSPECTOR_SECRET_1`…); the password is never read |
+| Press Enter, Escape, F-keys, shortcuts (Ctrl+S, Alt+F4), arrows/Delete outside text fields | A key press on the focused element (repeats are counted: "Down ×3") |
+| `Ctrl+Shift+F7` over an element | A check: the text it shows now must match, or (no text) it must exist |
+
+Stop with the same button or `Ctrl+Shift+F8`. Pick a language (FlaUI, uiautomation, pywinauto,
+Appium), then **Copy script** or **Save…**. **Delete step** removes a step you didn't mean to
+record. Recording again adds steps to the end. Every step finds its element from the desktop
+again and waits up to 10 s, so dialogs and windows that open along the way are waited for.
+
+How it works, and what it doesn't capture:
+
+- Each click is resolved to its element **the moment the button goes down**, before the app reacts.
+  A selector is then generated and verified in the background. If the element is already gone
+  (its dialog closed), the step gets a selector built from the snapshot and is marked
+  **unverified**.
+- **Typed text is never captured as keystrokes.** The keyboard hook reduces every printable key to
+  "something was typed"; the text comes from the field itself via UI Automation, when focus
+  leaves it or the next action happens. Password fields are never read.
+- Drags, scrolling, mouse wheel and Tab aren't recorded: scripts find elements without scrolling,
+  and target fields directly instead of tabbing to them. Clicks on window backgrounds, title
+  bars, scrollbars, the taskbar and the inspector itself are ignored.
+- The mouse and keyboard hooks exist only while recording. Input from automation scripts
+  (including generated ones) is ignored.
+- Live pick (Ctrl-hover) pauses while recording, so shortcuts like Ctrl+S don't pick elements.
+
 ## Console tool
 
 ```bash
@@ -102,7 +140,15 @@ This starts **interactive mode**. Leave the console open, switch to any app and 
 | `Ctrl+Shift+F10` | Inspect the element with keyboard focus |
 | `Ctrl+Shift+F11` | Delayed capture (3 s): open a menu or tooltip, then wait |
 | `Ctrl+Shift+F12` | Toggle hover tracking (one line per element you move over) |
-| `Ctrl+C` | Quit (in the console window) |
+| `Ctrl+Shift+F8` | Start/stop recording; each step is printed as it's recorded, the script on stop |
+| `Ctrl+Shift+F7` | While recording: add a check for the element under the cursor |
+| `Ctrl+C` | Quit (in the console window; stops recording first) |
+
+To record from the start and save the script to a file:
+
+```bash
+dotnet run --project src/UiInspector.Cli -- --record --lang pywinauto --out recorded_test.py
+```
 
 On laptops you may need to hold `Fn` for the F-keys. If another app already uses a hotkey, the
 tool says so at startup and the other hotkeys still work.
@@ -153,7 +199,8 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | `src/UiInspector.Cli` | Console front end: argument parsing, output formatting |
 | `src/UiInspector.Core/Selectors` | `AttributeStability` (which values can be trusted), `SelectorGenerator` (build, scope and live-verify selectors; click check), `CodeTemplates` (FlaUI, uiautomation, pywinauto, Appium) |
 | `src/UiInspector.Core/Web` | `CdpSession` (minimal DevTools Protocol client), `DebugPort` (finds `--remote-debugging-port` in the process tree), `PageScript` (in-page locate/count script), `WebBridge` (UIA element → DOM node, Playwright/Selenium locators, verification), `WebCodeTemplates` |
-| `tests/UiInspector.Core.Tests` | Unit tests, plus integration tests (`Category=Desktop`) against `Fixtures/selector_fixture.ps1` (WinForms window with duplicate captions, identical buttons and HWND-based IDs) and `Fixtures/web_fixture.html` (opened in Edge: test id, status-in-name links, duplicate captions with hashed classes, labelled input, iframe, Shadow DOM). Both open off-screen. The web tests need Microsoft Edge |
+| `src/UiInspector.Core/Recording` | `InputHook` (low-level mouse/keyboard hooks, only while recording), `KeyClassifier` (decides inside the hook what a key means; printable keys become "typed"), `TextTracker` (what was typed where, from field values), `StepBuilder` (double-clicks, drags, merging), `Recorder` (resolves each click at mouse-down on its own UIA worker, generates selectors in the background), `RecordingScripts` |
+| `tests/UiInspector.Core.Tests` | Unit tests, plus integration tests (`Category=Desktop`) against `Fixtures/selector_fixture.ps1` (WinForms window with duplicate captions, identical buttons, HWND-based IDs, a check box and a password field) and `Fixtures/web_fixture.html` (opened in Edge: test id, status-in-name links, duplicate captions with hashed classes, labelled input, iframe, Shadow DOM). Both open off-screen. The web tests need Microsoft Edge. The recorder tests feed it element-level events instead of real input, so they never move the mouse or type |
 
 ### Generated code: what has been run
 
@@ -166,6 +213,9 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | Playwright 1.64 (JavaScript, Python, C#) | Run unedited against the web fixture in Edge 156 for six cases (test id, status-in-name link, anchored duplicate, input fill, iframe, Shadow DOM): 18/18 acted on exactly the intended element; the app kept running afterwards |
 | Selenium 4.52 (Python) | Same six cases, 6/6 passed |
 | Selenium (Java) | Generated, **not run**: this machine has Java 8, and Selenium 4 needs Java 11+ |
+| Recorded scripts (FlaUI, uiautomation, pywinauto) | A recorded 6-step workflow (text, password from an environment variable, check box, button, anchored duplicate button, text check) run unedited against a fresh fixture: 3/3 left it in exactly the recorded state and passed their check. Key and mouse steps were checked by unit tests only, since running them would type into or click on whatever is in front |
+| Recorded scripts (Appium) | Generated and unit-tested, **not run** (no Appium server) |
+| Recorder with real mouse and keyboard | **Not run here**: the hook was installed and removed in a test, but recording real input would have captured the person using this computer. Try it on your apps |
 
 ## Notes from testing (useful for later phases)
 
@@ -182,4 +232,8 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 - **Searching the UIA tree doesn't wake Chromium's accessibility; a hit-test does.** Tools that only search (no point-picking) may see an empty page.
 - **A fresh Edge profile opens a "syncing your data" page** (Windows account sign-in). `--disable-sync` prevents it.
 - **Iframe content shows up in UIA as a nested `Document #RootWebArea`.** The web bridge uses the outermost one as the page.
+- **WinForms check boxes support both Invoke and Toggle.** Code uses Toggle for check boxes, since it says what the step does.
+- **A WinForms TextBox takes its Name from the label before it** (the fixture's notes box is named "Status: 3 items"). Its AutomationId is what identifies it.
+- **A busy app can drop out of a single tree search**: under load, one selector check right after a recorded click found no window. The recorder retries once before falling back to an unverified selector.
+- **The .NET Framework UI Automation client (`System.Windows.Automation`) doesn't see WinForms AutomationIds**, unlike UIA3 (FlaUI, uiautomation). Tools built on it see a different tree.
 - Mixed-DPI monitors haven't been tested yet (the development machine has one 100 % monitor).

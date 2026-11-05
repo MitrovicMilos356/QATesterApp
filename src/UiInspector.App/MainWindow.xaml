@@ -61,7 +61,7 @@
         <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="0,1,0,0" Padding="10,5" Background="#F9FAFB">
             <DockPanel>
                 <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}"
-                           Text="Ctrl+Shift+F9 pick under cursor · F10 focused · F11 delayed · F12 live pick on/off"/>
+                           Text="Ctrl+Shift+F9 pick under cursor · F10 focused · F11 delayed · F12 live pick on/off · F8 record · F7 add check"/>
                 <TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis" Margin="0,0,16,0"
                            AutomationProperties.AutomationId="StatusText"/>
             </DockPanel>
@@ -273,6 +273,94 @@
                                  FontFamily="Consolas" FontSize="12" Padding="6"
                                  HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
                                  AutomationProperties.AutomationId="CodeText"/>
+                    </DockPanel>
+                </TabItem>
+
+                <TabItem Header="Recorder" AutomationProperties.AutomationId="RecorderTab" DataContext="{Binding Recorder}">
+                    <DockPanel Margin="8,8,8,6">
+                        <StackPanel DockPanel.Dock="Top">
+                            <WrapPanel>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding ToggleRecordingCommand}"
+                                        AutomationProperties.AutomationId="RecordButton"
+                                        ToolTip="Start or stop recording. Works from any app: Ctrl+Shift+F8">
+                                    <TextBlock Text="{Binding RecordButtonText}" FontWeight="SemiBold">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                                                        <Setter Property="Foreground" Value="#B91C1C"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Button>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding AddCheckDelayedCommand}"
+                                        Content="{Binding CheckButtonText}" AutomationProperties.AutomationId="AddCheckButton"
+                                        ToolTip="Adds a step that checks the element under the cursor: its text, or that it exists. While recording, Ctrl+Shift+F7 does it at once."/>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding DeleteStepCommand}"
+                                        Content="Delete step" AutomationProperties.AutomationId="DeleteStepButton"/>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding ClearCommand}"
+                                        Content="Clear" AutomationProperties.AutomationId="ClearStepsButton"/>
+                            </WrapPanel>
+                            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{StaticResource MutedBrush}"
+                                       AutomationProperties.AutomationId="RecorderStatus"/>
+                        </StackPanel>
+
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="2*" MinHeight="80"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="3*" MinHeight="80"/>
+                            </Grid.RowDefinitions>
+
+                            <ListBox Grid.Row="0" Margin="0,8,0,0" ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}"
+                                     BorderBrush="{StaticResource PanelBorderBrush}" HorizontalContentAlignment="Stretch"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     AutomationProperties.AutomationId="RecordedSteps" AutomationProperties.Name="Recorded steps">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type local:StepRow}">
+                                        <StackPanel Margin="2,3">
+                                            <TextBlock TextWrapping="Wrap">
+                                                <Run Text="{Binding Number, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=". "/><Run Text="{Binding Text, Mode=OneWay}"/>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Tone}" Value="ok">
+                                                                <Setter Property="Foreground" Value="#15803D"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Tone}" Value="warn">
+                                                                <Setter Property="Foreground" Value="#B45309"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding Tone}" Value="bad">
+                                                                <Setter Property="Foreground" Value="#B91C1C"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+
+                            <DockPanel Grid.Row="1" Margin="0,8,0,6">
+                                <Button DockPanel.Dock="Right" Padding="10,3" Content="Save…" Command="{Binding SaveScriptCommand}"
+                                        AutomationProperties.AutomationId="SaveScriptButton" AutomationProperties.Name="Save script"/>
+                                <Button DockPanel.Dock="Right" Padding="10,3" Margin="0,0,6,0" Content="Copy script" Command="{Binding CopyScriptCommand}"
+                                        AutomationProperties.AutomationId="CopyScriptButton"/>
+                                <ComboBox ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}" DisplayMemberPath="Title"
+                                          Margin="0,0,8,0" AutomationProperties.AutomationId="ScriptLanguage" AutomationProperties.Name="Script language"/>
+                            </DockPanel>
+
+                            <TextBox Grid.Row="2" Text="{Binding SelectedScript.Code, Mode=OneWay}" IsReadOnly="True"
+                                     FontFamily="Consolas" FontSize="12" Padding="6"
+                                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                     AutomationProperties.AutomationId="ScriptText" AutomationProperties.Name="Recorded script"/>
+                        </Grid>
                     </DockPanel>
                 </TabItem>
                 </TabControl>

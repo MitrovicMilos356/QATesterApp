@@ -8,17 +8,23 @@ using UiInspector.Core.Selectors;
 namespace UiInspector.Core.Tests;
 
 /// <summary>Starts the WinForms selector fixture once for all integration tests and closes it afterwards.</summary>
-public sealed class SelectorFixtureWindow : IDisposable
+public class SelectorFixtureWindow : IDisposable
 {
     public const string Title = "UiInspector Selector Fixture";
 
     private readonly Process _process;
 
-    public SelectorFixtureWindow()
+    public SelectorFixtureWindow() : this(Title, "SelectorFixtureForm")
     {
+    }
+
+    /// <summary>Another instance with its own title and form name, for tests that change the fixture's state.</summary>
+    protected SelectorFixtureWindow(string title, string formName)
+    {
+        WindowTitle = title;
         var script = Path.Combine(AppContext.BaseDirectory, "Fixtures", "selector_fixture.ps1");
         _process = Process.Start(new ProcessStartInfo("powershell.exe",
-            $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\"")
+            $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Title \"{title}\" -FormName {formName}")
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -26,7 +32,7 @@ public sealed class SelectorFixtureWindow : IDisposable
 
         using var automation = new UIA3Automation();
         var window = Retry.WhileNull(
-            () => automation.GetDesktop().FindFirstChild(automation.ConditionFactory.ByName(Title)),
+            () => automation.GetDesktop().FindFirstChild(automation.ConditionFactory.ByName(title)),
             TimeSpan.FromSeconds(20)).Result;
         if (window is null)
         {
@@ -35,10 +41,13 @@ public sealed class SelectorFixtureWindow : IDisposable
         }
     }
 
+    public string WindowTitle { get; }
+
     public void Dispose()
     {
         if (!_process.HasExited) _process.Kill(entireProcessTree: true);
         _process.Dispose();
+        GC.SuppressFinalize(this);
     }
 }
 

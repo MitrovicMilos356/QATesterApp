@@ -102,7 +102,7 @@ It also helps with the most frustrating QA situations: elements stacked on top o
 | **Follow focus** | Inspect whatever has keyboard focus (UIA FocusChanged event). | Tab through a form; items with no mouse position |
 | **Tree pick** | Browse the tree and select a node. Its bounds are highlighted on screen. | Hidden, off-screen or zero-size elements |
 
-Getting the cursor position uses `GetCursorPos` polling plus `RegisterHotKey`. **No global low-level mouse hook is needed for hover.** That avoids antivirus false positives and input lag. A `WH_MOUSE_LL` hook is installed only for the optional "click to pick" mode, and only while that mode is active.
+Getting the cursor position uses `GetCursorPos` polling plus `RegisterHotKey`. **No global low-level mouse hook is needed for hover.** That avoids antivirus false positives and input lag. A `WH_MOUSE_LL` hook is installed only for the optional "click to pick" mode and for the recorder (§4.7), and only while that mode is active.
 
 ### 4.2 Highlight overlay
 - A borderless, layered, topmost, click-through window (`WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE`) that draws a rectangle around the element.
@@ -139,8 +139,17 @@ Output targets, each with a "how to attach to the app" snippet:
 | Appium Windows Driver / NovaWindows Driver | Any Appium client | Teams already on Appium/Selenium grids |
 | Playwright | JS/TS, Python, C# | Electron and WebView2 content via CDP |
 
-### 4.7 Recorder (Phase 4)
+### 4.7 Recorder (Phase 5)
 Click through a workflow, and the tool writes a full script: attach, then a sequence of actions using pattern-based actions, then waits. This is the feature that makes Playwright's `codegen` so popular, and no Windows-native tool does it well.
+
+How it's built:
+
+- **Hooks only while recording.** `WH_MOUSE_LL` and `WH_KEYBOARD_LL` run on their own message-loop thread and only hand events on. Synthetic input (`LLMHF_INJECTED`) is ignored, so running a generated script never records itself.
+- **Resolve at mouse-down.** The click's element and ancestor path are read on a dedicated UIA worker the moment the button goes down, before the app reacts (a dialog's OK button is gone a few milliseconds later). Selector generation and verification run afterwards on the main worker. An element that's gone by then gets a selector built from the snapshot, marked *unverified*.
+- **Text from fields, never from keystrokes.** The keyboard hook classifies each key on the spot. Printable keys leave the hook only as "something was typed". The typed text is read from the field's Value (or Text) pattern when focus leaves it or the next action happens, and only recorded if it changed. Password fields are never read; their step takes the value from an environment variable.
+- **Tidy steps.** Two quick clicks on one element become a double-click. A press-move-release becomes a drag, which is dropped. A click into a field followed by typing becomes one SetValue. Repeated keys are counted.
+- **Checks.** A hotkey adds an assertion for the element under the cursor: its current text, or that it exists.
+- **Not recorded:** drags, scrolling, Tab, and clicks on window backgrounds, title bars, the taskbar or the inspector. Keyboard navigation inside lists is recorded as key presses.
 
 ---
 
@@ -471,7 +480,7 @@ These cases cause the most QA confusion, and existing inspectors handle them bad
 | Selector ranking: Name > AutomationID | AutomationId (if stable) > Name. Name is localized and often dynamic. |
 | Separate MSAA backend needed | UIA wraps MSAA apps automatically through built-in proxies. A separate MSAA backend isn't needed. |
 | Continuous hover is too expensive and needs heavy throttling | `ElementFromPoint` takes milliseconds. A ~50–100 ms throttle is enough. The real risk is hung target apps, which need timeouts. |
-| Global `WH_MOUSE_LL` hook for inspection | Not needed for hover (`GetCursorPos` + `RegisterHotKey`). Only use the hook for click-to-pick. |
+| Global `WH_MOUSE_LL` hook for inspection | Not needed for hover (`GetCursorPos` + `RegisterHotKey`). Only use the hook for click-to-pick and while recording. |
 | Elevation mitigation: "run with equal permissions" | Proper solution is `uiAccess="true"`, which needs a signed binary in a secure install location. |
 | `app.window(title="Main Dashboard")` | Titles are fragile. Identify windows by process + AutomationId or ClassName. |
 | pywinauto as the main Python target | pywinauto is in low-maintenance mode. Offer it, but also support `uiautomation` and FlaUI. |
