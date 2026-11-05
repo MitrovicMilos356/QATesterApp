@@ -1,5 +1,25 @@
+# .NET build output
 bin/
 obj/
-.vs/
-*.user
 TestResults/
+*.user
+*.suo
+*.rsuser
+
+# IDEs
+.vs/
+.vscode/
+.idea/
+
+# Node (Playwright tooling)
+node_modules/
+
+# Python (test helpers, generated-code checks)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+Thumbs.db
+Desktop.ini
