@@ -206,6 +206,18 @@ public sealed partial class RecorderViewModel : ObservableObject
         _replayCancel = new CancellationTokenSource();
         Status = "Replaying… Ctrl+Shift+F8 or ■ Stop replay stops it.";
         Refresh();
+
+        // Errors in the web page now belong to the replay: "after step 3" is the replay's step 3.
+        var pageErrors = _recorder.PageErrors;
+        var started = 0;
+        void OnStarted(ReplayStepResult r)
+        {
+            if (r.Status == ReplayStatus.Running) Interlocked.Exchange(ref started, steps.ToList().FindIndex(s => s.Id == r.StepId) + 1);
+        }
+        pageErrors.Clear("replay");
+        pageErrors.StepAt = _ => Volatile.Read(ref started);
+        foreach (var port in steps.Select(s => s.Web?.Port ?? 0).Where(p => p > 0).Distinct()) pageErrors.Watch(port);
+        _replayer.Progress += OnStarted;
         try
         {
             var results = await _replayer.RunAsync(steps, secrets, _replayCancel.Token);
@@ -240,6 +252,9 @@ public sealed partial class RecorderViewModel : ObservableObject
         }
         finally
         {
+            // The step count stays: an error arriving late still belongs to the step that caused it.
+            // A new recording counts its own steps again (Recorder.StartAsync).
+            _replayer.Progress -= OnStarted;
             secrets.Clear();
             _replayCancel.Dispose();
             _replayCancel = null;

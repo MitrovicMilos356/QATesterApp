@@ -72,6 +72,32 @@ public static class BugReportRenderer
         return $"{CodeTemplates.Describe(step.Target)}: {chain} ({s.Strategy}; {s.Verification.Describe()})";
     }
 
+    private sealed record ErrorRow(string When, string Kind, string KindClass, string Text, string Where);
+
+    /// <summary>The page errors to list, or null when the section is left out.</summary>
+    private static List<ErrorRow>? PageErrors(BugReport report, BugReportOptions o)
+    {
+        if (!o.PageErrors || !report.PageErrorsWatched) return null;
+        return report.PageEvents
+            .Where(e => e.AfterStep <= report.Steps.Count)
+            .Select(e => new ErrorRow(
+                e.AfterStep == 0 ? "Before step 1" : $"After step {e.AfterStep}",
+                e.Kind switch
+                {
+                    Web.PageEventKind.ScriptError => "Script error",
+                    Web.PageEventKind.ConsoleError => "Console error",
+                    Web.PageEventKind.FailedRequest => "Failed request",
+                    _ => "Slow request",
+                },
+                e.Kind.ToString(),
+                e.Count > 1 ? $"{e.Text} (×{e.Count})" : e.Text,
+                e.Where ?? ""))
+            .ToList();
+    }
+
+    private static string NoPageErrors(BugReport report) =>
+        $"None while the steps were {(report.PageErrorsPhase == "replay" ? "replayed" : "recorded")}: no script errors, console errors, or failed or slow requests.";
+
     private static CodeSnippet? Script(BugReport report, BugReportOptions o) =>
         o.Script ? report.Scripts.FirstOrDefault(s => s.Id == o.ScriptLanguage) ?? report.Scripts.FirstOrDefault() : null;
 
@@ -118,6 +144,14 @@ public static class BugReportRenderer
               pre { background: #f3f4f6; padding: 12px; border-radius: 6px; overflow: auto; font: 12px Consolas, monospace; }
               ul.details li { font: 12px Consolas, monospace; margin-bottom: 4px; }
               .notes { white-space: pre-wrap; }
+              table.errors { border-collapse: collapse; width: 100%; font-size: 14px; }
+              table.errors td { padding: 5px 10px 5px 0; vertical-align: top; border-bottom: 1px solid #f3f4f6; }
+              table.errors td.when { color: #6b7280; white-space: nowrap; }
+              table.errors .where { display: block; color: #6b7280; font: 12px Consolas, monospace; word-break: break-all; }
+              .kind { display: inline-block; padding: 0 8px; border-radius: 9px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+              .kind-ScriptError, .kind-FailedRequest { background: #fee2e2; color: #991b1b; }
+              .kind-ConsoleError { background: #ffedd5; color: #9a3412; }
+              .kind-SlowRequest { background: #fef3c7; color: #92400e; }
               footer { margin-top: 36px; color: #9ca3af; font-size: 12px; }
             </style>
             </head>
@@ -159,6 +193,23 @@ public static class BugReportRenderer
                     sb.Append("</li>\n");
                 }
                 sb.Append("</ol>\n");
+            }
+        }
+
+        if (PageErrors(report, o) is { } errors)
+        {
+            sb.Append("<h2>Errors in the web page</h2>\n");
+            if (errors.Count == 0) sb.Append($"<p class=\"empty\">{H(NoPageErrors(report))}</p>\n");
+            else
+            {
+                sb.Append("<table class=\"errors\">\n");
+                foreach (var e in errors)
+                {
+                    sb.Append($"<tr><td class=\"when\">{H(e.When)}</td><td><span class=\"kind kind-{e.KindClass}\">{H(e.Kind)}</span></td>");
+                    sb.Append($"<td>{H(e.Text)}{(e.Where.Length > 0 ? $"<span class=\"where\">{H(e.Where)}</span>" : "")}</td></tr>\n");
+                }
+                sb.Append("</table>\n");
+                if (report.PageEventsDropped > 0) sb.Append($"<p class=\"meta\">And {report.PageEventsDropped} more, not listed.</p>\n");
             }
         }
 
@@ -254,6 +305,15 @@ public static class BugReportRenderer
             {
                 sb.AppendLine().AppendLine($"_{screenshots} screenshot{(screenshots == 1 ? "" : "s")} in the saved report._");
             }
+            sb.AppendLine();
+        }
+
+        if (PageErrors(report, o) is { } errors)
+        {
+            sb.AppendLine("## Errors in the web page").AppendLine();
+            if (errors.Count == 0) sb.AppendLine($"_{NoPageErrors(report)}_");
+            foreach (var e in errors) sb.AppendLine($"- {e.When} · **{e.Kind}:** {e.Text}{(e.Where.Length > 0 ? $" (`{e.Where.Replace("`", "'")}`)" : "")}");
+            if (report.PageEventsDropped > 0) sb.AppendLine($"- _And {report.PageEventsDropped} more, not listed._");
             sb.AppendLine();
         }
 

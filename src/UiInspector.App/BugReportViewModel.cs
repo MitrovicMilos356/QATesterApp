@@ -48,6 +48,11 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
         _recorder = recorder;
         _previewTimer = new DispatcherTimer(PreviewDelay, DispatcherPriority.Background, (_, _) => RenderPreview(), dispatcher) { IsEnabled = false };
         _recorder.Changed += () => dispatcher.BeginInvoke(() => OnStepsChanged());
+        _recorder.PageErrors.Changed += () => dispatcher.BeginInvoke(() =>
+        {
+            UpdatePageErrors();
+            QueuePreview();
+        });
         OnStepsChanged();
     }
 
@@ -92,6 +97,13 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
     [ObservableProperty] private bool _includeScript;
     [ObservableProperty] private ScriptLanguage _selectedScriptLanguage = NativeLanguages[0];
     [ObservableProperty] private bool _includeElementDetails;
+    [ObservableProperty] private bool _includePageErrors = true;
+
+    /// <summary>"Errors in the web page (3)" next to its check box.</summary>
+    [ObservableProperty] private string _pageErrorsLabel = "Errors in the web page";
+
+    /// <summary>Why page errors aren't in the report, when the steps are in a web page.</summary>
+    [ObservableProperty] private string _pageErrorsHint = "";
 
     // ---------------------------------------------------------------- output
 
@@ -182,6 +194,7 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
             StepScreenshots.Add(choice);
         }
         HasScreenshots = StepScreenshots.Count > 0;
+        UpdatePageErrors();
 
         var languages = steps.Count > 0
             ? RecordingScripts.Render(steps).Select(s => new ScriptLanguage(s.Id, s.Title)).ToList()
@@ -198,6 +211,17 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
     }
 
     private void OnChoiceChanged(object? sender, PropertyChangedEventArgs e) => QueuePreview();
+
+    private void UpdatePageErrors()
+    {
+        var monitor = _recorder.PageErrors;
+        var count = monitor.Events.Where(e => e.AfterStep <= ReportSteps.Count).Sum(e => e.Count) + monitor.Dropped;
+        var watched = monitor.Ports.Count > 0;
+        PageErrorsLabel = watched ? $"Errors in the web page ({count})" : "Errors in the web page";
+        PageErrorsHint = watched || !ReportSteps.Any(s => s.Web is not null) ? ""
+            : "Not captured: the browser wasn't started with a debugging port. Start it with --remote-debugging-port=9222 " +
+              "and record again to include script errors, console errors and failed requests.";
+    }
 
     private BugReportOptions Options() => new()
     {
@@ -217,6 +241,7 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
         Script = IncludeScript,
         ScriptLanguage = SelectedScriptLanguage.Id,
         ElementDetails = IncludeElementDetails,
+        PageErrors = IncludePageErrors,
         HiddenScreenshots = StepScreenshots.Where(c => !c.Include).Select(c => c.StepId).ToHashSet(),
     };
 
@@ -233,6 +258,10 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
             Steps = steps,
             Environment = EnvironmentInfo.Collect(steps, _recorder.StartedAt ?? DateTime.Now),
             Scripts = steps.Count > 0 ? RecordingScripts.Render(steps) : [],
+            PageEvents = _recorder.PageErrors.Events,
+            PageErrorsWatched = _recorder.PageErrors.Ports.Count > 0,
+            PageErrorsPhase = _recorder.PageErrors.Phase,
+            PageEventsDropped = _recorder.PageErrors.Dropped,
         };
     }
 

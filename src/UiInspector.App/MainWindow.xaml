@@ -1013,6 +1013,20 @@
                                             <CheckBox Content="Language" IsChecked="{Binding IncludeLanguage}" AutomationProperties.AutomationId="IncludeLanguage"/>
                                             <CheckBox Content="Date and time" IsChecked="{Binding IncludeDateTime}" AutomationProperties.AutomationId="IncludeDateTime"/>
                                         </StackPanel>
+                                        <CheckBox Content="{Binding PageErrorsLabel}" IsChecked="{Binding IncludePageErrors}" AutomationProperties.AutomationId="IncludePageErrors"
+                                                  ToolTip="Script errors, console errors, and failed or slow requests in the web page while the steps ran (Chromium browsers and apps with a debugging port)"/>
+                                        <TextBlock Text="{Binding PageErrorsHint}" TextWrapping="Wrap" FontSize="12" Margin="26,0,0,4"
+                                                   AutomationProperties.AutomationId="PageErrorsHint">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding PageErrorsHint}" Value="">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
                                         <CheckBox Content="Element details (selectors, for developers)" IsChecked="{Binding IncludeElementDetails}" AutomationProperties.AutomationId="IncludeElementDetails"/>
                                         <CheckBox Content="Automation script that reproduces it" IsChecked="{Binding IncludeScript}" AutomationProperties.AutomationId="IncludeScript"/>
                                         <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeScript}">

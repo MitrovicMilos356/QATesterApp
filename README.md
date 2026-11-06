@@ -222,6 +222,7 @@ Every part has its own check box:
 | Expected and actual result | on | Side by side; flagged if not filled in |
 | Severity, Notes | on | Shown when set |
 | Environment | on | With its own boxes for Windows version, app name and version, app install path (off by default), screens and scaling, language, date and time |
+| Errors in the web page | on | Script errors, console errors, and failed or slow requests while the steps ran, each with the step it came after (see below) |
 | Element details | off | Each step's verified selector, for developers |
 | Automation script | off | The script that replays the steps, in the chosen language |
 
@@ -230,8 +231,28 @@ Every part has its own check box:
 puts Markdown without images on the clipboard, for Jira, Azure DevOps or GitHub.
 
 Screenshots show only the app's own window (it's asked to draw itself), never the screen, so
-other apps and overlapping windows don't appear. Switch them off with **Screenshots** in the
-the Record page. The preview files are kept in a temporary folder that's deleted when the app closes.
+other apps and overlapping windows don't appear. Switch them off with **Screenshots** on the
+Record page. The preview files are kept in a temporary folder that's deleted when the app closes.
+
+**Errors in the web page.** When the steps are in a Chromium browser or app started with
+`--remote-debugging-port` (Chrome, Edge, Electron, WebView2), the recorder follows its pages from
+the first step in them, including tabs opened later, and collects what developers ask for first:
+
+| Kind | What counts |
+| :--- | :--- |
+| Script error | An uncaught exception: `TypeError: Cannot read properties of null (reading 'total')`, with the file and line |
+| Console error | `console.error`, failed `console.assert`, and browser errors such as a blocked script (CSP) or mixed content |
+| Failed request | `POST /api/orders → 500 Internal Server Error`, or no answer at all (`net::ERR_CONNECTION_REFUSED`); requests the page cancelled don't count |
+| Slow request | A page load or API call (fetch, XHR) that took 3 s or more |
+
+Each one says which step it came after, so "after step 4: `POST /api/orders → 500`" points the
+developer at the backend in a minute. The same error repeated after the same step is listed once
+with a count. Addresses are shown without their query string (`/api/orders?…`), since it can hold
+tokens or e-mail addresses, and the report may be shared. Errors logged before the recording
+started are left out. A replay collects them afresh, counted by the replay's steps, so a report
+from a failed replay shows what the page did during that replay. If the pages were followed and
+nothing went wrong, the report says so; without a debugging port the check box explains how to
+get them. Firefox isn't covered (it doesn't offer the DevTools protocol).
 
 ### Test plan: what to test, and how
 
@@ -485,7 +506,7 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | `src/UiInspector.App` | WPF GUI: highlight overlay, element tree (lazy-loaded), details panel, live pick |
 | `src/UiInspector.Cli` | Console front end: argument parsing, output formatting |
 | `src/UiInspector.Core/Selectors` | `AttributeStability` (which values can be trusted), `SelectorGenerator` (build, scope and live-verify selectors; click check), `CodeTemplates` (FlaUI, uiautomation, pywinauto, Appium) |
-| `src/UiInspector.Core/Web` | `CdpSession` (minimal DevTools Protocol client), `DebugPort` (finds `--remote-debugging-port` in the process tree), `PageScript` (in-page locate/count script), `WebBridge` (UIA element → DOM node, Playwright/Selenium locators, verification), `WebCodeTemplates` |
+| `src/UiInspector.Core/Web` | `CdpSession` (minimal DevTools Protocol client), `DebugPort` (finds `--remote-debugging-port` in the process tree), `PageScript` (in-page locate/count script), `WebBridge` (UIA element → DOM node, Playwright/Selenium locators, verification), `WebCodeTemplates`, `PageErrorMonitor` (script errors, console errors, failed and slow requests while recording or replaying) |
 | `src/UiInspector.Core/Recording` | `InputHook` (low-level mouse/keyboard hooks, only while recording), `KeyClassifier` (decides inside the hook what a key means; printable keys become "typed"), `TextTracker` (what was typed where, from field values), `StepBuilder` (double-clicks, drags, merging), `Recorder` (resolves each click at mouse-down on its own UIA worker, generates selectors in the background), `RecordingScripts` |
 | `src/UiInspector.Core/Reporting` | `WindowCapture` (PrintWindow of one window; element outlines), `EnvironmentInfo` (Windows version, app versions, monitors), `BugReport` (options, step wording), `BugReportRenderer` (HTML, Markdown, text) |
 | `tests/UiInspector.Core.Tests` | Unit tests, plus integration tests (`Category=Desktop`) against `Fixtures/selector_fixture.ps1` (WinForms window with duplicate captions, identical buttons, HWND-based IDs, a check box and a password field) and `Fixtures/web_fixture.html` (opened in Edge: test id, status-in-name links, duplicate captions with hashed classes, labelled input, iframe, Shadow DOM). Both open off-screen. The web tests need Microsoft Edge. The recorder tests feed it element-level events instead of real input, so they never move the mouse or type |

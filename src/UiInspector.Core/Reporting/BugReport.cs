@@ -40,6 +40,9 @@ public sealed record BugReportOptions
     /// <summary>The selector of each step's element, for the developer.</summary>
     public bool ElementDetails { get; init; }
 
+    /// <summary>Script errors, console errors and failed or slow requests in the web page.</summary>
+    public bool PageErrors { get; init; } = true;
+
     /// <summary>Ids of steps whose screenshot is left out (e.g. it shows private data).</summary>
     public IReadOnlySet<int> HiddenScreenshots { get; init; } = new HashSet<int>();
 }
@@ -58,6 +61,18 @@ public sealed record BugReport
     public EnvironmentInfo? Environment { get; init; }
 
     public IReadOnlyList<CodeSnippet> Scripts { get; init; } = [];
+
+    /// <summary>What went wrong in the web pages while the steps ran (see <see cref="Web.PageErrorMonitor"/>).</summary>
+    public IReadOnlyList<Web.PageEvent> PageEvents { get; init; } = [];
+
+    /// <summary>The pages were followed, so no events means none happened (not that nobody looked).</summary>
+    public bool PageErrorsWatched { get; init; }
+
+    /// <summary>"recording" or "replay": when the events were collected.</summary>
+    public string PageErrorsPhase { get; init; } = "recording";
+
+    /// <summary>Events past the monitor's limit, counted but not listed.</summary>
+    public int PageEventsDropped { get; init; }
 }
 
 /// <summary>Steps in the words a manual tester would use ("Click the “Save” button").</summary>

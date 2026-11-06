@@ -33,11 +33,17 @@ public static class CdpDiscovery
 }
 
 /// <summary>
-/// Minimal Chrome DevTools Protocol client: JSON-RPC over one WebSocket, request/response only
-/// (events are ignored). Enough to evaluate script and query the DOM and accessibility tree.
+/// Minimal Chrome DevTools Protocol client: JSON-RPC over one WebSocket. Enough to evaluate script,
+/// query the DOM and accessibility tree, and follow events (console, network) when subscribed.
 /// </summary>
 public sealed class CdpSession : IAsyncDisposable
 {
+    /// <summary>An event from the page (method and params), raised on the receive loop's thread.</summary>
+    public event Action<string, JsonElement>? EventReceived;
+
+    /// <summary>The connection is gone (the page closed, or the browser quit).</summary>
+    public bool IsClosed => _socket.State != WebSocketState.Open;
+
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(10);
 
     private readonly ClientWebSocket _socket = new();
@@ -152,7 +158,23 @@ public sealed class CdpSession : IAsyncDisposable
     {
         using var doc = JsonDocument.Parse(utf8);
         var root = doc.RootElement;
-        if (!root.TryGetProperty("id", out var idElement) || !_pending.TryGetValue(idElement.GetInt32(), out var tcs)) return;
+        if (!root.TryGetProperty("id", out var idElement))
+        {
+            if (EventReceived is { } handler && root.TryGetProperty("method", out var method))
+            {
+                var parameters = root.TryGetProperty("params", out var p) ? p.Clone() : default;
+                try
+                {
+                    handler(method.GetString() ?? "", parameters);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or KeyNotFoundException or FormatException)
+                {
+                    // An event shaped differently than expected must not stop the connection.
+                }
+            }
+            return;
+        }
+        if (!_pending.TryGetValue(idElement.GetInt32(), out var tcs)) return;
 
         if (root.TryGetProperty("error", out var error))
         {

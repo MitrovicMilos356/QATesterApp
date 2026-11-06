@@ -67,6 +67,17 @@ public sealed class Recorder : IAsyncDisposable
         _builder = new StepBuilder(_options.ClickSettings ?? ClickSettings.FromSystem());
         _consumer = Task.Run(ConsumeAsync);
         _generator = Task.Run(GenerateAsync);
+        PageErrors.StepAt = RecordedStepsAt;
+    }
+
+    // "After step 3" while recording: the steps recorded by then.
+    private int RecordedStepsAt(DateTime time) => Steps.Count(s => s.RecordedAt <= time);
+
+    // A replay counts its own steps (RecorderViewModel); recording again counts the recorded ones.
+    private void StartPageErrors()
+    {
+        PageErrors.Clear("recording");
+        PageErrors.StepAt = RecordedStepsAt;
     }
 
     /// <summary>Steps or recording state changed. Raised on a background thread.</summary>
@@ -82,6 +93,12 @@ public sealed class Recorder : IAsyncDisposable
 
     /// <summary>Take a screenshot of the app's window for each step (used by bug reports).</summary>
     public bool CaptureScreenshots { get; set; } = true;
+
+    /// <summary>
+    /// Script errors, console errors and failed or slow requests in the web pages the steps act on,
+    /// when the browser runs with a debugging port (found with the first step in its page).
+    /// </summary>
+    public Web.PageErrorMonitor PageErrors { get; } = new();
 
     /// <summary>When the first recording started (since the last Clear).</summary>
     public DateTime? StartedAt { get; private set; }
@@ -119,6 +136,7 @@ public sealed class Recorder : IAsyncDisposable
         }
 
         IsRecording = true;
+        if (StartedAt is null || PageErrors.Phase != "recording") StartPageErrors();
         StartedAt ??= DateTime.Now;
         Changed?.Invoke();
     }
@@ -156,6 +174,7 @@ public sealed class Recorder : IAsyncDisposable
             _clickTrees.Clear();
         }
         StartedAt = IsRecording ? DateTime.Now : null;
+        StartPageErrors();
         Changed?.Invoke();
     }
 
@@ -658,6 +677,7 @@ public sealed class Recorder : IAsyncDisposable
         try
         {
             var web = await _service.GenerateWebAsync(path, native, _lifetime.Token, tree);
+            if (web is { Port: > 0 }) PageErrors.Watch(web.Port);
             if (web is { Source: Web.WebSource.DevTools } && web.Notes.Any(n => n.Contains("differs from the UIA name", StringComparison.Ordinal)))
             {
                 var pageUrl = web.PageUrl.Length > 0 ? web.PageUrl : null;
@@ -806,6 +826,7 @@ public sealed class Recorder : IAsyncDisposable
         catch (TimeoutException)
         {
         }
+        await PageErrors.DisposeAsync();
         _snapshots.Dispose();
         _atInput.Dispose();
         _lifetime.Dispose();
