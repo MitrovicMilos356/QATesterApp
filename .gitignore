@@ -23,3 +23,6 @@ venv/
 # OS
 Thumbs.db
 Desktop.ini
+
+# WPF build temp projects, left behind by an interrupted build
+*_wpftmp.csproj
