@@ -1,4 +1,5 @@
 using System.Drawing;
+using UiInspector.Core.Reporting;
 using UiInspector.Core.Selectors;
 
 namespace UiInspector.Core.Recording;
@@ -36,7 +37,7 @@ public sealed class StepBuilder(ClickSettings settings)
     public RecordedStep? Find(int id) => _steps.Find(s => s.Id == id);
 
     /// <summary>Records a mouse button press. Returns the id of a step that needs a selector, if any.</summary>
-    public int? AddClick(IReadOnlyList<ElementInfo> path, MouseButton button, Point position, long time)
+    public int? AddClick(IReadOnlyList<ElementInfo> path, MouseButton button, Point position, long time, StepScreenshot? screenshot = null)
     {
         var target = path[^1];
         if (button == MouseButton.Left && _lastDown is { Button: MouseButton.Left } last
@@ -56,6 +57,7 @@ public sealed class StepBuilder(ClickSettings settings)
             Id = _nextId++,
             Action = button == MouseButton.Right ? RecordedAction.RightClick : RecordedAction.Click,
             Path = path,
+            Screenshot = screenshot,
         };
         _steps.Add(step);
         _lastDown = (step.Id, button, position, time, target);
@@ -82,7 +84,7 @@ public sealed class StepBuilder(ClickSettings settings)
     }
 
     /// <summary>Records the text a field ended up with. Returns the id of a step that needs a selector, if any.</summary>
-    public int? AddText(TextEntry entry)
+    public int? AddText(TextEntry entry, StepScreenshot? screenshot = null)
     {
         var field = entry.Field;
         var action = field.CanSetValue ? RecordedAction.SetValue : RecordedAction.TypeText;
@@ -93,20 +95,20 @@ public sealed class StepBuilder(ClickSettings settings)
             // A plain click into the field just before typing only gave it focus: the text replaces it.
             if (last.Action is RecordedAction.SetValue or RecordedAction.TypeText or RecordedAction.Click)
             {
-                Replace(last with { Action = action, Text = entry.Text, IsSecret = field.IsSecret });
+                Replace(last with { Action = action, Text = entry.Text, IsSecret = field.IsSecret, Screenshot = screenshot ?? last.Screenshot });
                 _lastDown = null;
                 return null;
             }
         }
 
-        var step = new RecordedStep { Id = _nextId++, Action = action, Path = field.Path, Text = entry.Text, IsSecret = field.IsSecret };
+        var step = new RecordedStep { Id = _nextId++, Action = action, Path = field.Path, Text = entry.Text, IsSecret = field.IsSecret, Screenshot = screenshot };
         _steps.Add(step);
         _lastDown = null;
         return step.Id;
     }
 
     /// <summary>Records a key step on the focused element. Returns the id of a step that needs a selector, if any.</summary>
-    public int? AddKey(IReadOnlyList<ElementInfo> focusPath, KeyChord key)
+    public int? AddKey(IReadOnlyList<ElementInfo> focusPath, KeyChord key, StepScreenshot? screenshot = null)
     {
         _lastDown = null;
         if (_steps.Count > 0 && _steps[^1] is { Action: RecordedAction.PressKey } last
@@ -116,12 +118,12 @@ public sealed class StepBuilder(ClickSettings settings)
             return null;
         }
 
-        var step = new RecordedStep { Id = _nextId++, Action = RecordedAction.PressKey, Path = focusPath, Key = key };
+        var step = new RecordedStep { Id = _nextId++, Action = RecordedAction.PressKey, Path = focusPath, Key = key, Screenshot = screenshot };
         _steps.Add(step);
         return step.Id;
     }
 
-    public int AddCheck(IReadOnlyList<ElementInfo> path, string? text, TextSource source)
+    public int AddCheck(IReadOnlyList<ElementInfo> path, string? text, TextSource source, StepScreenshot? screenshot = null)
     {
         _lastDown = null;
         var step = new RecordedStep
@@ -131,14 +133,15 @@ public sealed class StepBuilder(ClickSettings settings)
             Path = path,
             Text = text,
             CheckSource = source,
+            Screenshot = screenshot,
         };
         _steps.Add(step);
         return step.Id;
     }
 
-    public void SetSelector(int id, SelectorResult? result, Selector? fallback, string? problem)
+    public void SetSelector(int id, SelectorResult? result, Selector? fallback, string? problem, Web.WebResult? web = null)
     {
-        if (Find(id) is { } step) Replace(step with { Selector = result, Fallback = fallback, Problem = problem });
+        if (Find(id) is { } step) Replace(step with { Selector = result, Fallback = fallback, Problem = problem, Web = web });
     }
 
     public bool Remove(int id)

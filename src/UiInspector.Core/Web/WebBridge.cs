@@ -711,7 +711,7 @@ public sealed partial class WebBridge
     private static string Js(string value) => JsonSerializer.Serialize(value);
 
     /// <summary>Origin for web pages (so a changing path doesn't break page lookup), full URL without query otherwise.</summary>
-    private static string UrlPrefix(string url)
+    internal static string UrlPrefix(string url)
     {
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)) return url;
         if (uri.Scheme is "http" or "https") return $"{uri.Scheme}://{uri.Authority}/";

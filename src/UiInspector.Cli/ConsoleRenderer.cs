@@ -83,7 +83,9 @@ public sealed class ConsoleRenderer
                 return;
             }
 
-            Row("Page", $"{web.PageTitle}  ({web.PageUrl})  via port {web.Port}");
+            Row("Page", web.Source == WebSource.DevTools
+                ? $"{web.PageTitle}  ({web.PageUrl})  via port {web.Port}"
+                : $"{web.PageTitle}  ({web.PageUrl})  from the accessibility tree (no debug port)");
             if (web.Element is { } element) Row("DOM element", element.Describe());
             foreach (var note in web.Notes)
             {

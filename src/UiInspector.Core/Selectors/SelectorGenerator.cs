@@ -30,7 +30,8 @@ public sealed class SelectorGenerator(ElementInspector inspector)
     internal const string UnverifiedWarning =
         "Not verified: the element was gone (e.g. its dialog closed) before the selector could be checked, so it may match more than one element.";
 
-    public SelectorResult Generate(AutomationBase automation, IReadOnlyList<ElementInfo> pathFromRoot)
+    /// <param name="tree">Where to search and verify: the live UI (default), or a snapshot taken when the user clicked.</param>
+    public SelectorResult Generate(AutomationBase automation, IReadOnlyList<ElementInfo> pathFromRoot, IElementTree? tree = null)
     {
         var target = pathFromRoot[^1];
         var result = new SelectorResult
@@ -45,12 +46,15 @@ public sealed class SelectorGenerator(ElementInspector inspector)
         if (pathFromRoot.Any(e => e.Ref is null))
             return result with { Problem = "The element has no live handle; pick it again." };
 
-        var occlusion = CheckOcclusion(automation, target);
-        var desktop = pathFromRoot[0].Ref!.Element;
+        // A snapshot must hold the inspected path (it may miss content an app added a moment later).
+        var live = tree is null || tree is TreeSnapshot snapshot && !pathFromRoot.Skip(1).All(snapshot.Contains);
+        if (live) tree = new LiveTree(automation);
+        // Whether a click would reach it only means something for the UI as it is now.
+        var occlusion = live ? CheckOcclusion(automation, target) : null;
         var window = pathFromRoot[1];
 
         var windowStep = BuildWindowStep(window, out var windowWarnings);
-        var windowMatches = FindMatches(automation, desktop, windowStep, TreeScope.Children);
+        var windowMatches = tree!.FindAll(pathFromRoot[0], windowStep, TreeScope.Children);
         var windowVerification = Verify(windowMatches, window);
 
         // Apps like Firefox give every window the same AutomationId; the title then tells them apart.
@@ -60,7 +64,7 @@ public sealed class SelectorGenerator(ElementInspector inspector)
             if (title.IsUsable)
             {
                 var withTitle = windowStep with { Conditions = [.. windowStep.Conditions, new(SelectorProperty.Name, title.Value, title.Match)] };
-                var titleVerification = Verify(FindMatches(automation, desktop, withTitle, TreeScope.Children), window);
+                var titleVerification = Verify(tree!.FindAll(pathFromRoot[0], withTitle, TreeScope.Children), window);
                 if (titleVerification.Status == VerificationStatus.Unique)
                 {
                     windowStep = withTitle;
@@ -93,7 +97,7 @@ public sealed class SelectorGenerator(ElementInspector inspector)
             return result with { Best = windowOnly, Occlusion = occlusion };
         }
 
-        var selectors = BuildTargetSelectors(automation, pathFromRoot, windowStep, windowWarnings);
+        var selectors = BuildTargetSelectors(tree!, pathFromRoot, windowStep, windowWarnings);
         var ranked = selectors
             .OrderByDescending(s => s.Score)
             .DistinctBy(s => s.Strategy)
@@ -157,10 +161,10 @@ public sealed class SelectorGenerator(ElementInspector inspector)
     }
 
     private List<Selector> BuildTargetSelectors(
-        AutomationBase automation, IReadOnlyList<ElementInfo> path, SelectorStep windowStep, List<string> windowWarnings)
+        IElementTree tree, IReadOnlyList<ElementInfo> path, SelectorStep windowStep, List<string> windowWarnings)
     {
         var target = path[^1];
-        var windowElement = path[1].Ref!.Element;
+        var windowElement = path[1];
         var targetCandidates = Candidates(target, isTarget: true);
         var selectors = new List<Selector>();
 
@@ -177,7 +181,7 @@ public sealed class SelectorGenerator(ElementInspector inspector)
         // 1. A unique match anywhere inside the window.
         foreach (var candidate in targetCandidates)
         {
-            var verification = Verify(FindMatches(automation, windowElement, candidate.Step, TreeScope.Descendants), target);
+            var verification = Verify(tree.FindAll(windowElement, candidate.Step, TreeScope.Descendants), target);
             if (verification.Status == VerificationStatus.Unique)
             {
                 selectors.Add(Make([candidate.Step], candidate.Strategy, candidate.Score, candidate.Warnings, verification));
@@ -191,14 +195,14 @@ public sealed class SelectorGenerator(ElementInspector inspector)
         foreach (var anchor in anchors)
         {
             var anchorCandidate = Candidates(anchor, isTarget: false)
-                .FirstOrDefault(c => Verify(FindMatches(automation, windowElement, c.Step, TreeScope.Descendants), anchor).Status == VerificationStatus.Unique);
+                .FirstOrDefault(c => Verify(tree.FindAll(windowElement, c.Step, TreeScope.Descendants), anchor).Status == VerificationStatus.Unique);
             if (anchorCandidate is null) continue;
 
             usedAnchor ??= (anchorCandidate, anchor);
             var found = false;
             foreach (var candidate in targetCandidates)
             {
-                var verification = Verify(FindMatches(automation, anchor.Ref!.Element, candidate.Step, TreeScope.Descendants), target);
+                var verification = Verify(tree.FindAll(anchor, candidate.Step, TreeScope.Descendants), target);
                 if (verification.Status != VerificationStatus.Unique) continue;
 
                 found = true;
@@ -217,14 +221,14 @@ public sealed class SelectorGenerator(ElementInspector inspector)
         //    "Order 1042" in it, the card titled "Invoices". This is how a person tells
         //    look-alike controls apart, and it survives rows being added or reordered.
         var scopeIndex = usedAnchor is { } scoped ? path.ToList().FindIndex(e => e.IsSameElement(scoped.Element)) : 1;
-        selectors.AddRange(ContentAnchoredSelectors(automation, path, Math.Max(scopeIndex, 1), targetCandidates, usedAnchor?.Step, Make));
+        selectors.AddRange(ContentAnchoredSelectors(tree, path, Math.Max(scopeIndex, 1), targetCandidates, usedAnchor?.Step, Make));
         if (selectors.Count > 0) return selectors;
 
         // 4. Last resort: position among the matches, inside the best scope available.
-        var scopeElement = usedAnchor?.Element.Ref!.Element ?? windowElement;
+        var scopeElement = usedAnchor?.Element ?? windowElement;
         foreach (var candidate in targetCandidates)
         {
-            var matches = FindMatches(automation, scopeElement, candidate.Step, TreeScope.Descendants);
+            var matches = tree.FindAll(scopeElement, candidate.Step, TreeScope.Descendants);
             var index = matches.FindIndex(m => SameRuntimeId(m, target));
             if (index < 0) continue;
 
@@ -246,29 +250,29 @@ public sealed class SelectorGenerator(ElementInspector inspector)
     /// <param name="scopeIndex">Path index of the search scope: the window, or the nearest uniquely identifiable ancestor.</param>
     /// <param name="scopeAnchor">The step that finds that ancestor, or null for the window.</param>
     private List<Selector> ContentAnchoredSelectors(
-        AutomationBase automation, IReadOnlyList<ElementInfo> path, int scopeIndex, List<Candidate> targetCandidates,
+        IElementTree tree, IReadOnlyList<ElementInfo> path, int scopeIndex, List<Candidate> targetCandidates,
         Candidate? scopeAnchor, MakeSelector make)
     {
         var selectors = new List<Selector>();
         var target = path[^1];
-        var scope = path[scopeIndex].Ref!.Element;
+        var scope = path[scopeIndex];
         var lowest = Math.Max(scopeIndex + 1, path.Count - 1 - MaxContentAnchorDepth);
 
         for (var i = path.Count - 2; i >= lowest; i--)
         {
             var container = path[i];
-            if (string.IsNullOrEmpty(container.ControlType) || container.Ref is null) continue;
+            if (string.IsNullOrEmpty(container.ControlType)) continue;
             var containerStep = ContainerStep(container);
-            if (FindMatches(automation, scope, containerStep, TreeScope.Descendants).Count > MaxLookAlikeContainers) continue;
+            if (tree.FindAll(scope, containerStep, TreeScope.Descendants).Count > MaxLookAlikeContainers) continue;
 
-            foreach (var landmark in Landmarks(automation, container, target))
+            foreach (var landmark in Landmarks(tree, container, target))
             {
                 var anchorStep = containerStep with { Has = landmark.Step };
-                if (Verify(FindMatches(automation, scope, anchorStep, TreeScope.Descendants), container).Status != VerificationStatus.Unique) continue;
+                if (Verify(tree.FindAll(scope, anchorStep, TreeScope.Descendants), container).Status != VerificationStatus.Unique) continue;
 
                 foreach (var candidate in targetCandidates)
                 {
-                    var verification = Verify(FindMatches(automation, container.Ref.Element, candidate.Step, TreeScope.Descendants), target);
+                    var verification = Verify(tree.FindAll(container, candidate.Step, TreeScope.Descendants), target);
                     if (verification.Status != VerificationStatus.Unique) continue;
 
                     IReadOnlyList<SelectorStep> steps = scopeAnchor is { } a ? [a.Step, anchorStep, candidate.Step] : [anchorStep, candidate.Step];
@@ -298,26 +302,16 @@ public sealed class SelectorGenerator(ElementInspector inspector)
     /// Texts inside <paramref name="container"/> that might tell it apart from look-alikes: labels
     /// first, other named elements next. The target's own name is skipped (every look-alike has it).
     /// </summary>
-    private static IEnumerable<Landmark> Landmarks(AutomationBase automation, ElementInfo container, ElementInfo target)
+    private static IEnumerable<Landmark> Landmarks(IElementTree tree, ElementInfo container, ElementInfo target)
     {
-        var props = automation.PropertyLibrary.Element;
-        var request = new CacheRequest { TreeScope = TreeScope.Element, AutomationElementMode = AutomationElementMode.None };
-        request.Add(props.Name);
-        request.Add(props.ControlType);
-        request.Add(props.RuntimeId);
-
-        List<(string Type, string Name)> named;
-        using (request.Activate())
-        {
-            var descendants = container.Ref!.Element.FindAllDescendants();
-            if (descendants.Length > MaxLandmarkScan) yield break;
-            named = descendants
-                .Where(d => !(d.Properties.RuntimeId.ValueOrDefault ?? []).AsSpan().SequenceEqual(target.RuntimeId.ToArray()))
-                .Select(d => (Type: d.Properties.ControlType.TryGetValue(out var t) ? t.ToString() : "", Name: d.Properties.Name.ValueOrDefault ?? ""))
-                .Where(d => d.Type.Length > 0 && d.Name.Trim().Length > 0 && d.Name.Trim() != target.Name.Trim())
-                .Distinct()
-                .ToList();
-        }
+        var descendants = tree.Descendants(container, MaxLandmarkScan);
+        if (descendants is null) yield break;
+        var named = descendants
+            .Where(d => !d.RuntimeId.AsSpan().SequenceEqual(target.RuntimeId.ToArray()))
+            .Select(d => (Type: d.ControlType, d.Name))
+            .Where(d => d.Type.Length > 0 && d.Name.Trim().Length > 0 && d.Name.Trim() != target.Name.Trim())
+            .Distinct()
+            .ToList();
 
         var ranked = named
             .Select(d => (d.Type, Verdict: AttributeStability.AnalyzeLandmarkText(d.Name)))
@@ -408,68 +402,9 @@ public sealed class SelectorGenerator(ElementInspector inspector)
         return type;
     }
 
-    // ------------------------------------------------------------------ live matching
+    // ------------------------------------------------------------------ verification
 
-    private sealed record Match(int[] RuntimeId);
-
-    private static List<Match> FindMatches(AutomationBase automation, AutomationElement scope, SelectorStep step, TreeScope treeScope)
-    {
-        var props = automation.PropertyLibrary.Element;
-        var request = new CacheRequest
-        {
-            TreeScope = TreeScope.Element,
-            // Checking what an element contains needs a live element to search inside.
-            AutomationElementMode = step.Has is null ? AutomationElementMode.None : AutomationElementMode.Full,
-        };
-        request.Add(props.RuntimeId);
-        request.Add(props.Name);
-        request.Add(props.AutomationId);
-        request.Add(props.ClassName);
-
-        // Cached values are only read while the request is active, so everything happens inside it.
-        using (request.Activate())
-        {
-            var found = scope.FindAll(treeScope, BuildCondition(automation.ConditionFactory, step));
-            var contains = step.Conditions.Where(c => c.Match == MatchKind.Contains).ToList();
-            return found
-                .Where(e => contains.All(c => (Read(e, c.Property) ?? "").Contains(c.Value, StringComparison.Ordinal)))
-                .Where(e => step.Has is null || FindMatches(automation, e, step.Has, TreeScope.Descendants).Count > 0)
-                .Select(e => new Match(e.Properties.RuntimeId.TryGetValue(out var id) ? id : []))
-                .ToList();
-        }
-    }
-
-    private static string? Read(AutomationElement e, SelectorProperty property) => property switch
-    {
-        SelectorProperty.Name => e.Properties.Name.ValueOrDefault,
-        SelectorProperty.AutomationId => e.Properties.AutomationId.ValueOrDefault,
-        SelectorProperty.ClassName => e.Properties.ClassName.ValueOrDefault,
-        _ => null,
-    };
-
-    private static ConditionBase BuildCondition(ConditionFactory cf, SelectorStep step)
-    {
-        var exact = step.Conditions
-            .Where(c => c.Match == MatchKind.Exact)
-            .Select(c => c.Property switch
-            {
-                SelectorProperty.ControlType => cf.ByControlType(Enum.Parse<ControlType>(c.Value)),
-                SelectorProperty.AutomationId => cf.ByAutomationId(c.Value),
-                SelectorProperty.Name => cf.ByName(c.Value),
-                SelectorProperty.ClassName => cf.ByClassName(c.Value),
-                _ => throw new ArgumentOutOfRangeException(nameof(step)),
-            })
-            .ToArray();
-
-        return exact.Length switch
-        {
-            0 => TrueCondition.Default,
-            1 => exact[0],
-            _ => new AndCondition(exact),
-        };
-    }
-
-    private static SelectorVerification Verify(List<Match> matches, ElementInfo expected)
+    private static SelectorVerification Verify(List<int[]> matches, ElementInfo expected)
     {
         if (matches.Count == 0) return new(VerificationStatus.NotFound, 0);
         var containsExpected = matches.Any(m => SameRuntimeId(m, expected));
@@ -477,8 +412,8 @@ public sealed class SelectorGenerator(ElementInspector inspector)
         return new(matches.Count == 1 ? VerificationStatus.Unique : VerificationStatus.Ambiguous, matches.Count);
     }
 
-    private static bool SameRuntimeId(Match match, ElementInfo element) =>
-        element.RuntimeId.Count > 0 && match.RuntimeId.AsSpan().SequenceEqual(element.RuntimeId.ToArray());
+    private static bool SameRuntimeId(int[] runtimeId, ElementInfo element) =>
+        element.RuntimeId.Count > 0 && runtimeId.AsSpan().SequenceEqual(element.RuntimeId.ToArray());
 
     // ------------------------------------------------------------------ occlusion
 

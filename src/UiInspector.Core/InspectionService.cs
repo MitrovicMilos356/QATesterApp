@@ -62,27 +62,64 @@ public sealed class InspectionService(UiaWorker worker, ElementInspector inspect
 
     /// <param name="pathFromRoot">Desktop first, then the top-level window, …, the element last.</param>
     /// <param name="includeWeb">Also read Chromium pages over CDP for Playwright/Selenium locators.</param>
+    /// <param name="snapshot">Verify against this snapshot (taken when the user clicked) instead of the live UI.</param>
     public async Task<SelectorResult> GenerateSelectorAsync(
-        IReadOnlyList<ElementInfo> pathFromRoot, CancellationToken cancellationToken = default, bool includeWeb = true)
+        IReadOnlyList<ElementInfo> pathFromRoot, CancellationToken cancellationToken = default, bool includeWeb = true, IElementTree? snapshot = null)
     {
-        var result = await worker.RunAsync(a => _selectorGenerator.Generate(a, pathFromRoot), cancellationToken, SelectorTimeout);
+        var result = await worker.RunAsync(a => _selectorGenerator.Generate(a, pathFromRoot, snapshot), cancellationToken, SelectorTimeout);
         if (!includeWeb || pathFromRoot[^1].FrameworkId != "Chrome") return result;
+        return result with { Web = await GenerateWebAsync(pathFromRoot, result, cancellationToken, snapshot) };
+    }
 
-        // The web side talks to the page over CDP, not UIA, so it runs off the UIA worker.
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(WebTimeout);
+    /// <summary>
+    /// Playwright/Selenium locators for an element in a Chromium page: read from the page itself
+    /// when the app has a debug port, otherwise (or if that fails) built from the accessibility
+    /// tree that UI Automation already sees.
+    /// </summary>
+    public async Task<WebResult> GenerateWebAsync(IReadOnlyList<ElementInfo> pathFromRoot, SelectorResult native, CancellationToken cancellationToken = default, IElementTree? snapshot = null)
+    {
+        var launch = WebApps.Describe(pathFromRoot);
+        string? devToolsProblem = null;
+
+        var port = CdpPort ?? TryFindPort(pathFromRoot[^1].ProcessId);
+        if (port is not null)
+        {
+            // The web side talks to the page over CDP, not UIA, so it runs off the UIA worker.
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(WebTimeout);
+            try
+            {
+                var web = await _webBridge.InspectAsync(pathFromRoot, port, timeout.Token);
+                if (web.Connected) return web with { Launch = launch };
+                devToolsProblem = web.Problem;
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                devToolsProblem = $"The page didn't answer on port {port} within {WebTimeout.TotalSeconds:0} s.";
+            }
+            catch (Exception ex) when (ex is CdpException or System.Net.WebSockets.WebSocketException or System.Text.Json.JsonException
+                                           or KeyNotFoundException or InvalidOperationException)
+            {
+                devToolsProblem = $"Reading the page over port {port} failed: {ex.Message}";
+            }
+        }
+
+        var pageUrl = await worker.RunAsync(_ => WebApps.ReadPageUrl(pathFromRoot), cancellationToken);
+        var fromTree = AccessibilityLocators.FromSelector(native, pathFromRoot, pageUrl, launch);
+        fromTree = await worker.RunAsync(a => AccessibilityLocators.WithPrecedingLabel(fromTree, pathFromRoot, snapshot ?? new LiveTree(a)), cancellationToken);
+        fromTree = await worker.RunAsync(a => AccessibilityLocators.WithInnerText(fromTree, pathFromRoot, pageUrl, launch, snapshot ?? new LiveTree(a)), cancellationToken);
+        return devToolsProblem is null || !fromTree.Connected ? fromTree : fromTree with { Notes = [.. fromTree.Notes, devToolsProblem] };
+    }
+
+    private static int? TryFindPort(int processId)
+    {
         try
         {
-            return result with { Web = await _webBridge.InspectAsync(pathFromRoot, CdpPort, timeout.Token) };
+            return DebugPort.TryFind(processId);
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (System.Management.ManagementException)
         {
-            return result with { Web = WebResult.Unavailable($"The page didn't answer within {WebTimeout.TotalSeconds:0} s.") };
-        }
-        catch (Exception ex) when (ex is CdpException or System.Net.WebSockets.WebSocketException or System.Text.Json.JsonException
-                                       or System.Management.ManagementException or KeyNotFoundException or InvalidOperationException)
-        {
-            return result with { Web = WebResult.Unavailable($"Reading the page failed: {ex.Message}") };
+            return null;
         }
     }
 

@@ -13,7 +13,7 @@ namespace UiInspector.Core.Tests;
 /// Opens Fixtures/web_fixture.html in Microsoft Edge (app mode, throwaway profile, remote
 /// debugging on <see cref="Port"/>) at an off-screen position, and closes it afterwards.
 /// </summary>
-public sealed class EdgeWebFixture : IDisposable
+public class EdgeWebFixture : IDisposable
 {
     public const string Title = "UiInspector Web Fixture";
     private const string EdgePath = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
@@ -21,18 +21,29 @@ public sealed class EdgeWebFixture : IDisposable
 
     private readonly string _profile = Path.Combine(Path.GetTempPath(), "uiinspector-edge-" + Guid.NewGuid().ToString("N"));
 
-    /// <summary>9339 when free (so saved snippets are stable), otherwise any free port.</summary>
-    public int Port { get; } = IsPortFree(PreferredPort) ? PreferredPort : FreePort();
+    /// <summary>9339 when free (so saved snippets are stable), otherwise any free port; 0 without a debug port.</summary>
+    public int Port { get; }
 
-    public EdgeWebFixture()
+    public EdgeWebFixture() : this(withDebugPort: true)
+    {
+    }
+
+    protected EdgeWebFixture(bool withDebugPort)
     {
         if (!File.Exists(EdgePath)) throw new InvalidOperationException("Microsoft Edge is required for the web bridge tests.");
+        Port = !withDebugPort ? 0 : IsPortFree(PreferredPort) ? PreferredPort : FreePort();
 
         var page = new Uri(Path.Combine(AppContext.BaseDirectory, "Fixtures", "web_fixture.html")).AbsoluteUri;
+        var port = withDebugPort ? $"--remote-debugging-port={Port} " : "";
         Process.Start(new ProcessStartInfo(EdgePath,
             // --disable-sync: a fresh profile otherwise signs in with the Windows account and opens a sync dialog.
-            $"--user-data-dir=\"{_profile}\" --remote-debugging-port={Port} --no-first-run --no-default-browser-check --disable-sync " +
-            $"--window-position=-3000,-3000 --window-size=900,820 --app=\"{page}\"") { UseShellExecute = false })?.Dispose();
+            // The backgrounding switches keep the off-screen window rendering, as an on-screen app would; Chromium
+            // updates its accessibility tree with rendering, so without them changes show up late or not at all.
+            $"--user-data-dir=\"{_profile}\" {port}--no-first-run --no-default-browser-check --disable-sync " +
+            "--disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling " +
+            // Shell-started, so Edge doesn't inherit the test runner's output handles: a leftover Edge
+            // holding them would keep `dotnet test` waiting after the tests finish.
+            $"--window-position=-3000,-3000 --window-size=900,820 --app=\"{page}\"") { UseShellExecute = true })?.Dispose();
 
         using var automation = new UIA3Automation();
         var ready = Retry.WhileFalse(() =>
@@ -109,11 +120,20 @@ public sealed class EdgeWebFixture : IDisposable
 
     public void Dispose()
     {
-        foreach (var id in OwnProcessIds())
+        GC.SuppressFinalize(this);
+        // Edge can start helper processes while it's being closed, so repeat until none are left.
+        for (var attempt = 0; attempt < 10; attempt++)
         {
-            try { using var p = Process.GetProcessById(id); p.Kill(); }
-            catch (ArgumentException) { }
-            catch (InvalidOperationException) { }
+            var ids = OwnProcessIds();
+            if (ids.Count == 0) break;
+            foreach (var id in ids)
+            {
+                try { using var p = Process.GetProcessById(id); p.Kill(entireProcessTree: true); }
+                catch (ArgumentException) { }
+                catch (InvalidOperationException) { }
+                catch (System.ComponentModel.Win32Exception) { }
+            }
+            Thread.Sleep(300);
         }
         for (var attempt = 0; attempt < 10 && Directory.Exists(_profile); attempt++)
         {

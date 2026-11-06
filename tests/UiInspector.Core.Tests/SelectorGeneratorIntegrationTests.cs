@@ -23,22 +23,30 @@ public class SelectorFixtureWindow : IDisposable
     {
         WindowTitle = title;
         var script = Path.Combine(AppContext.BaseDirectory, "Fixtures", "selector_fixture.ps1");
+        // Shell-started (hidden), so it doesn't inherit the test runner's output handles: a leftover
+        // fixture holding them would keep `dotnet test` waiting after the tests finish.
         _process = Process.Start(new ProcessStartInfo("powershell.exe",
             $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\" -Title \"{title}\" -FormName {formName}")
         {
-            UseShellExecute = false,
-            CreateNoWindow = true,
+            UseShellExecute = true,
+            WindowStyle = ProcessWindowStyle.Hidden,
         })!;
 
-        using var automation = new UIA3Automation();
-        var window = Retry.WhileNull(
-            () => automation.GetDesktop().FindFirstChild(automation.ConditionFactory.ByName(title)),
-            TimeSpan.FromSeconds(20)).Result;
-        if (window is null)
+        // A UIA call can fail now and then while other desktop tests run; keep trying, and if the
+        // window still doesn't show up, close the process before giving up so it can't be left behind.
+        AutomationElement? window = null;
+        try
         {
-            Dispose();
-            throw new InvalidOperationException("The selector fixture window didn't appear.");
+            using var automation = new UIA3Automation();
+            window = Retry.WhileNull(
+                () => automation.GetDesktop().FindFirstChild(automation.ConditionFactory.ByName(title)),
+                TimeSpan.FromSeconds(20), ignoreException: true).Result;
         }
+        finally
+        {
+            if (window is null) Dispose();
+        }
+        if (window is null) throw new InvalidOperationException("The selector fixture window didn't appear.");
     }
 
     public string WindowTitle { get; }
@@ -148,6 +156,54 @@ public class SelectorGeneratorIntegrationTests(SelectorFixtureWindow fixture) : 
         Assert.Equal(VerificationStatus.Unique, best.Verification.Status);
         Assert.Contains("containing \"Order 1042\"", best.Strategy);
         Assert.DoesNotContain(best.Warnings, w => w.Contains("position"));
+    }
+
+    // Regression (Discord's profile popout): the click closes the popup, so by the time the selector
+    // is checked the only thing that told the two "OK" buttons apart is gone. Checked against a
+    // snapshot taken at the click, the selector is as good as for any other element.
+    [Fact]
+    public void ClickThatClosesItsPopup_IsVerifiedAgainstTheSnapshotTakenAtTheClick()
+    {
+        var window = Window;
+        window.FindFirstDescendant(_automation.ConditionFactory.ByAutomationId("showPopupButton"))!.Patterns.Invoke.Pattern.Invoke();
+        var question = Retry.WhileNull(() => window.FindFirstDescendant(_automation.ConditionFactory.ByName("Confirm delete?")), TimeSpan.FromSeconds(5)).Result!;
+        var popup = _automation.TreeWalkerFactory.GetControlViewWalker().GetParent(question);
+        var ok = Buttons(popup, "OK").Single();
+
+        var inspection = _inspector.InspectElement(_automation, ok)!;
+        var path = inspection.Ancestors.Reverse().Append(inspection.Element).ToList();
+        var snapshot = TreeSnapshot.Capture(_automation, path)!; // what the recorder does at mouse-down
+
+        ok.Patterns.Invoke.Pattern.Invoke(); // the app reacts: the popup closes
+        Retry.WhileTrue(() => window.FindFirstDescendant(_automation.ConditionFactory.ByName("Confirm delete?")) is not null, TimeSpan.FromSeconds(5));
+
+        var generator = new SelectorGenerator(_inspector);
+        var live = generator.Generate(_automation, path);
+        Assert.True(live.Best is null || live.Best.Steps.Any(s => s.Index is not null), "Checked live, the closed popup can't be told apart.");
+
+        var atClick = generator.Generate(_automation, path, snapshot);
+        var best = atClick.Best!;
+        Assert.Equal(VerificationStatus.Unique, best.Verification.Status);
+        Assert.All(best.Steps, s => Assert.Null(s.Index));
+        Assert.Contains("containing \"Confirm delete?\"", best.Strategy);
+    }
+
+    [Fact]
+    public void Snapshot_CopiesTheWholeWindowQuickly()
+    {
+        var target = Window.FindFirstDescendant(_automation.ConditionFactory.ByAutomationId("saveButton"))!;
+        var inspection = _inspector.InspectElement(_automation, target)!;
+        var path = inspection.Ancestors.Reverse().Append(inspection.Element).ToList();
+
+        var watch = Stopwatch.StartNew();
+        var snapshot = TreeSnapshot.Capture(_automation, path)!;
+        Assert.True(watch.ElapsedMilliseconds < 1000, $"took {watch.ElapsedMilliseconds} ms");
+        Assert.True(snapshot.Count > 30);
+        Assert.All(path.Skip(1), e => Assert.True(snapshot.Contains(e)));
+
+        // Same answer as checking live.
+        var generator = new SelectorGenerator(_inspector);
+        Assert.Equal(generator.Generate(_automation, path).Best!.Strategy, generator.Generate(_automation, path, snapshot).Best!.Strategy);
     }
 
     [Fact]

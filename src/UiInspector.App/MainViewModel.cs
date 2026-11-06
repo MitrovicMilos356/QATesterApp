@@ -40,15 +40,18 @@ public sealed partial class MainViewModel : ObservableObject
 
     private bool _livePickBeforeRecording;
 
-    public MainViewModel(InspectionService service, IHighlighter highlighter, RecorderViewModel recorder)
+    public MainViewModel(InspectionService service, IHighlighter highlighter, RecorderViewModel recorder, BugReportViewModel bugReport)
     {
         _service = service;
         _highlighter = highlighter;
         Recorder = recorder;
+        BugReport = bugReport;
         recorder.RecordingChanged += OnRecordingChanged;
     }
 
     public RecorderViewModel Recorder { get; }
+
+    public BugReportViewModel BugReport { get; }
 
     // Holding Ctrl for shortcuts like Ctrl+S would otherwise pick elements while recording.
     private void OnRecordingChanged(bool recording)
@@ -517,7 +520,12 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
-        var lines = new List<string> { $"Web page: {web.PageTitle} (port {web.Port})" };
+        var lines = new List<string>
+        {
+            web.Source == WebSource.DevTools
+                ? $"Web page: {web.PageTitle} (read over debug port {web.Port})"
+                : $"Web page: {web.PageTitle} (from the accessibility tree; no debug port needed)",
+        };
         if (web.Element is { } element) lines.Add($"DOM element: {element.Describe()}");
         lines.Add(web.Best is { } best
             ? $"Playwright: {best.Verification.Describe()} Strategy: {best.Strategy}  →  {string.Join(" › ", best.Frames.Concat(best.Steps))}"

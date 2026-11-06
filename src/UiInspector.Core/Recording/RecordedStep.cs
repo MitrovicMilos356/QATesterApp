@@ -63,7 +63,15 @@ public sealed record RecordedStep
 
     public TextSource CheckSource { get; init; }
 
+    /// <summary>The app's window when the step happened (for bug reports); null if not taken.</summary>
+    public Reporting.StepScreenshot? Screenshot { get; init; }
+
+    public DateTime RecordedAt { get; init; } = DateTime.Now;
+
     public SelectorResult? Selector { get; init; }
+
+    /// <summary>Playwright/Selenium locators, for steps inside a Chromium web page.</summary>
+    public Web.WebResult? Web { get; init; }
 
     public Selector? Fallback { get; init; }
 

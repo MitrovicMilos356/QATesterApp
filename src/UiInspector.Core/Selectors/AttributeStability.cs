@@ -90,6 +90,15 @@ public static partial class AttributeStability
             return AttributeVerdict.Unusable(name, "The name is long or multi-line, so it's likely content (text, a message), not a label.");
         }
 
+        // "GoAway 11:21 PM", "Today at 9:05", "Edited 05/11/2026": times and dates change every time.
+        if (TimeOrDate().IsMatch(trimmed))
+        {
+            var rest = TimeOrDate().Replace(trimmed, " ").Trim(' ', ',', '-', '·', '—');
+            rest = MultipleSpaces().Replace(rest, " ");
+            if (rest.Length < MinPrefixLength) return AttributeVerdict.Unusable(name, $"The name \"{trimmed}\" is a time or date, which changes.");
+            return new(Stability.Weak, rest, MatchKind.Contains, $"Matches only \"{rest}\": the rest of \"{trimmed}\" is a time or date, which changes.");
+        }
+
         // "Dyno (direct message), Online": the part after the last comma is often a status.
         var comma = trimmed.LastIndexOf(", ", StringComparison.Ordinal);
         if (comma >= MinPrefixLength)
@@ -126,7 +135,7 @@ public static partial class AttributeStability
     {
         if (string.IsNullOrWhiteSpace(name)) return AttributeVerdict.Unusable(name, "No text.");
         var trimmed = name.Trim();
-        if (trimmed.Length > MaxNameLength / 2 || trimmed.Contains('\n') || Guid().IsMatch(trimmed) || HashedToken().IsMatch(trimmed))
+        if (trimmed.Length > MaxNameLength / 2 || trimmed.Contains('\n') || Guid().IsMatch(trimmed) || HashedToken().IsMatch(trimmed) || TimeOrDate().IsMatch(trimmed))
         {
             return AttributeVerdict.Unusable(name, "Too long or generated to identify a row by.");
         }
@@ -177,4 +186,12 @@ public static partial class AttributeStability
 
     [GeneratedRegex(@"^(?<head>.*?\S)\s*[\(\[]?\d+[\)\]]?$")]
     private static partial Regex TrailingCounter();
+
+    // Clock times (11:21, 11:21 PM, 23:05:59), numeric dates (05/11/2026, 2026-11-05, 5.11.2026),
+    // and the words chat apps put around them ("Today at", "Yesterday at").
+    [GeneratedRegex(@"(?:\b(?:Today|Yesterday|Tomorrow)(?:\s+at)?\s+)?\b\d{1,2}:\d{2}(?::\d{2})?(?:\s?[AaPp]\.?[Mm]\.?)?\b|\b\d{1,4}[./-]\d{1,2}[./-]\d{1,4}\b")]
+    private static partial Regex TimeOrDate();
+
+    [GeneratedRegex(@"\s{2,}")]
+    private static partial Regex MultipleSpaces();
 }

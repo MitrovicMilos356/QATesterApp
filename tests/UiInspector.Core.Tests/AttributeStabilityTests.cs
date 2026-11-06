@@ -4,6 +4,24 @@ namespace UiInspector.Core.Tests;
 
 public class AttributeStabilityTests
 {
+    [Theory]
+    [InlineData("GoAway 11:21 PM", "GoAway")]          // Discord's message header
+    [InlineData("Edited 05/11/2026 14:02", "Edited")]
+    [InlineData("Ada, Today at 9:05", "Ada")]
+    public void TimesAndDates_AreDroppedFromNames(string name, string expected)
+    {
+        var verdict = AttributeStability.AnalyzeName(name);
+        Assert.Equal(expected, verdict.Value);
+        Assert.Equal(MatchKind.Contains, verdict.Match);
+    }
+
+    [Fact]
+    public void ANameThatIsOnlyATime_IsUnusable()
+    {
+        Assert.False(AttributeStability.AnalyzeName("11:21 PM").IsUsable);
+        Assert.False(AttributeStability.AnalyzeLandmarkText("Today at 9:05").IsUsable);
+    }
+
     [Fact]
     public void LandmarkText_KeepsNumbers_BecauseTheyAreTheIdentity()
     {

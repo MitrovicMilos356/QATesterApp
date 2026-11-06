@@ -149,6 +149,82 @@ public class RecorderIntegrationTests(RecorderFixtureWindow fixture) : IClassFix
             Assert.DoesNotContain("s3cret", script.Code);
             File.WriteAllText(Path.Combine(outDir, $"recorded.{script.Id}.txt"), script.Code);
         }
+
+        // Every step got a screenshot of the (off-screen) fixture window, captured as it was then.
+        Assert.All(steps, s => Assert.NotNull(s.Screenshot));
+        Assert.All(steps, s => Assert.NotEqual(s.Screenshot!.Png, s.Screenshot.HighlightedPng));
+
+        // A real report from this recording, for looking at.
+        var report = new Reporting.BugReport
+        {
+            Title = "Deleting an order shows the wrong status",
+            Severity = Reporting.Severity.Medium,
+            Expected = "The status says which order was deleted.",
+            Actual = "It says \"Deleted order\" without the number.",
+            Steps = steps,
+            Environment = Reporting.EnvironmentInfo.Collect(steps, DateTime.Now),
+            Scripts = _recorder.RenderScripts(),
+        };
+        var html = Reporting.BugReportRenderer.Html(report, new Reporting.BugReportOptions { Script = true, ElementDetails = true });
+        Assert.DoesNotContain("s3cret", html);
+        File.WriteAllText(Path.Combine(outDir, "bug_report.html"), html);
+    }
+
+    [Fact]
+    public void WindowCapture_TakesOnlyTheWindow_AndOutlinesTheElement()
+    {
+        var handle = Window.Properties.NativeWindowHandle.Value;
+        var image = Reporting.WindowCapture.CaptureWindow(handle);
+
+        Assert.NotNull(image);
+        Assert.InRange(image.Width, 500, 600);   // the fixture's size, not the screen's
+        Assert.InRange(image.Height, 520, 600);
+        var save = ById("saveButton");
+        using (var bitmap = new System.Drawing.Bitmap(new MemoryStream(image.Png)))
+        {
+            // The window's contents were drawn, not just its frame: the Save button's area has
+            // its border and caption in it, so it isn't a single color.
+            var button = save.BoundingRectangle;
+            var colors = new HashSet<int>();
+            for (var x = button.Left; x < button.Right; x += 3)
+            {
+                for (var y = button.Top; y < button.Bottom; y += 3)
+                {
+                    colors.Add(bitmap.GetPixel(x - image.ScreenBounds.X, y - image.ScreenBounds.Y).ToArgb());
+                }
+            }
+            Assert.True(colors.Count > 2, $"The Save button's area has {colors.Count} color(s): the window's contents weren't drawn.");
+        }
+
+        var shot = Reporting.WindowCapture.Mark(image, save.BoundingRectangle);
+        Assert.NotEqual(shot.Png, shot.HighlightedPng);
+    }
+
+    // Regression: Windows never repaints an off-screen window, so the compositor's copy showed its
+    // old content (an empty field after text was typed into it).
+    [Fact]
+    public void WindowCapture_ShowsTheCurrentState()
+    {
+        var handle = Window.Properties.NativeWindowHandle.Value;
+        var notes = ById("notesBox");
+        notes.Patterns.Value.Pattern.SetValue("");
+        var before = Reporting.WindowCapture.CaptureWindow(handle)!;
+
+        notes.Patterns.Value.Pattern.SetValue("WWWWWWWWWWWWWWWWWWWW");
+        var after = Reporting.WindowCapture.CaptureWindow(handle)!;
+
+        Assert.NotEqual(Region(before, notes.BoundingRectangle), Region(after, notes.BoundingRectangle));
+    }
+
+    private static List<int> Region(Reporting.WindowImage image, System.Drawing.Rectangle rect)
+    {
+        using var bitmap = new System.Drawing.Bitmap(new MemoryStream(image.Png));
+        var pixels = new List<int>();
+        for (var x = rect.Left + 2; x < rect.Right - 2; x += 2)
+        {
+            pixels.Add(bitmap.GetPixel(x - image.ScreenBounds.X, rect.Top + rect.Height / 2 - image.ScreenBounds.Y).ToArgb());
+        }
+        return pixels;
     }
 
     [Fact]

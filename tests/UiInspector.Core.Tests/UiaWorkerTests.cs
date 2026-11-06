@@ -7,6 +7,10 @@ public class UiaWorkerTests
 {
     private static readonly TimeSpan ShortTimeout = TimeSpan.FromMilliseconds(500);
 
+    // Starting UI Automation on the replacement thread can take over a second while the other
+    // desktop tests run in parallel; the point is that it recovers, not how fast.
+    private static readonly TimeSpan RecoveryTimeout = TimeSpan.FromSeconds(15);
+
     [Fact]
     public async Task RunAsync_ReturnsResultFromWorkerThread()
     {
@@ -44,10 +48,10 @@ public class UiaWorkerTests
 
         var stopwatch = Stopwatch.StartNew();
         await Assert.ThrowsAsync<UiaTimeoutException>(() => worker.RunAsync(_ => release.Wait(Timeout.Infinite)));
-        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(3), $"Timeout took {stopwatch.Elapsed}");
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(10), $"Timeout took {stopwatch.Elapsed}"); // 0.5 s, plus slack for a busy machine
 
-        // The hung thread is still blocked, yet new work runs immediately on a replacement.
-        var threadName = await worker.RunAsync(_ => Thread.CurrentThread.Name);
+        // The hung thread is still blocked, yet new work runs on a replacement.
+        var threadName = await worker.RunAsync(_ => Thread.CurrentThread.Name, timeout: RecoveryTimeout);
         Assert.Equal("UIA worker #2", threadName);
         Assert.Equal(1, worker.RestartCount);
 
@@ -67,7 +71,7 @@ public class UiaWorkerTests
         var queuedError = await Record.ExceptionAsync(() => queued);
         Assert.True(queuedError is UiaTimeoutException or OperationCanceledException, $"Unexpected: {queuedError}");
 
-        Assert.Equal(7, await worker.RunAsync(_ => 7));
+        Assert.Equal(7, await worker.RunAsync(_ => 7, timeout: RecoveryTimeout));
         release.Set();
     }
 

@@ -26,7 +26,7 @@ $form.Text = $Title
 $form.Name = $FormName
 $form.StartPosition = 'Manual'
 $form.Location = New-Object System.Drawing.Point($X, $Y)
-$form.Size = New-Object System.Drawing.Size(540, 560)
+$form.Size = New-Object System.Drawing.Size(540, 600)
 $form.ShowInTaskbar = $false
 
 $status = New-Object System.Windows.Forms.Label
@@ -82,5 +82,18 @@ for ($i = 0; $i -lt $orderNumbers.Count; $i++) {
     $ordersList.Controls.Add($row)
 }
 
-$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes, $remember, $password, $passwordInfo, $ordersList))
+# A popup that closes when its OK button is clicked, like a confirmation or a profile popout. Only the
+# popup's text tells its OK apart from the other OK, and the popup is gone right after the click.
+$showPopup = New-Button 'Show popup' 'showPopupButton' 10 520
+$otherOk = Add-Reporter (New-Button 'OK' '' 110 520) 'Other OK clicked'
+$popup = New-Object System.Windows.Forms.Panel
+$popup.Location = New-Object System.Drawing.Point(220, 512); $popup.Size = New-Object System.Drawing.Size(290, 40); $popup.BorderStyle = 'FixedSingle'; $popup.Visible = $false
+$question = New-Object System.Windows.Forms.Label
+$question.Text = 'Confirm delete?'; $question.Location = New-Object System.Drawing.Point(5, 12); $question.AutoSize = $true
+$popupOk = New-Button 'OK' '' 190 7
+$popupOk.Add_Click({ $status.Text = 'Confirmed'; $popup.Visible = $false })
+$popup.Controls.AddRange(@($question, $popupOk))
+$showPopup.Add_Click({ $popup.Visible = $true })
+
+$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes, $remember, $password, $passwordInfo, $ordersList, $showPopup, $otherOk, $popup))
 [System.Windows.Forms.Application]::Run($form)

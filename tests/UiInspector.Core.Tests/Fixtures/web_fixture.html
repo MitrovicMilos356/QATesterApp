@@ -52,6 +52,9 @@
 -->
 <div class="orders__5b7e2" id="orders-placeholder"></div>
 
+<!-- A clickable area with no name, role or id (like a chat app's message or channel tile): only the text inside identifies it. -->
+<div class="tile__7c1e0" onclick="report('tile clicked')"><span>Weekly summary</span> <span>3 new</span></div>
+
 <script>
   function report(text) { document.getElementById('status').textContent = text; }
   const numbers = location.search.includes('reordered') ? [1040, 1043, 1042, 1041] : [1041, 1042, 1043];

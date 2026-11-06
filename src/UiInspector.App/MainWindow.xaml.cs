@@ -16,6 +16,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _pickTimer;
     private readonly MainViewModel _viewModel;
     private readonly Recorder _recorder;
+    private readonly BugReportViewModel _bugReport;
     private bool _tickRunning;
 
     public MainWindow()
@@ -25,8 +26,15 @@ public partial class MainWindow : Window
         var inspector = new ElementInspector();
         var service = new InspectionService(_worker, inspector);
         _recorder = new Recorder(service, inspector);
-        _viewModel = new MainViewModel(service, _overlay, new RecorderViewModel(_recorder, _overlay, Dispatcher));
+        _bugReport = new BugReportViewModel(_recorder, Dispatcher);
+        _viewModel = new MainViewModel(service, _overlay, new RecorderViewModel(_recorder, _overlay, Dispatcher), _bugReport);
         DataContext = _viewModel;
+
+        // WebBrowser.Source isn't reliably bindable; navigate whenever a new preview file is written.
+        _bugReport.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(BugReportViewModel.PreviewUri) && _bugReport.PreviewUri is { } uri) PreviewBrowser.Navigate(uri);
+        };
 
         _pickTimer = new DispatcherTimer(PickInterval, DispatcherPriority.Input, OnPickTimer, Dispatcher);
         Loaded += OnLoaded;
@@ -109,6 +117,7 @@ public partial class MainWindow : Window
         // (On the thread pool: its awaits would otherwise need this blocked UI thread.)
         Task.Run(() => _recorder.DisposeAsync().AsTask()).Wait(TimeSpan.FromSeconds(3));
         _overlay.Close();
+        _bugReport.Dispose();
         _worker.Dispose();
     }
 }

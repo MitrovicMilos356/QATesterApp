@@ -21,7 +21,58 @@ public static class RecordingScripts
             new("uiautomation", "Python · uiautomation", PythonUiAutomation(script)),
             new("pywinauto", "Python · pywinauto", Pywinauto(script)),
             new("appium", "Appium · Python", Appium(script)),
+            .. WebScripts(script),
         ];
+    }
+
+    // ------------------------------------------------------------------ Playwright / Selenium
+
+    /// <summary>Playwright and Selenium scripts, when the steps are in a Chromium web page (others are skipped).</summary>
+    private static IReadOnlyList<CodeSnippet> WebScripts(Script script)
+    {
+        var app = script.Steps.Select(s => s.Web).FirstOrDefault(w => w is { Connected: true });
+        if (app is null) return [];
+
+        var steps = script.Steps.Select((step, i) => WebStep(script, step, i + 1)).ToList();
+        var apps = script.Apps.Count == 0 ? "" : $" in {string.Join(", ", script.Apps)}";
+        var header = new List<string> { $"Recorded with UiInspector: {script.Steps.Count} step{(script.Steps.Count == 1 ? "" : "s")}{apps}." };
+        header.AddRange(script.SecretNames.Values.Select(name => $"Set the {name} environment variable to the password typed in that step."));
+        header.AddRange(script.Steps
+            .Select(s => s.Web).OfType<Web.WebResult>().Where(w => w.Connected)
+            .SelectMany(w => w.Notes).Distinct()
+            .Select(n => $"Note: {n}"));
+        return Web.WebCodeTemplates.Render(app, steps, header);
+    }
+
+    private static Web.WebStep WebStep(Script script, RecordedStep step, int number)
+    {
+        var comment = $"{number}. {OneLine(step.Describe())}";
+        if (step.Web is not { Connected: true } web)
+        {
+            return new Web.WebStep { Comment = comment, SkipReason = step.IsGenerating ? "its locator was still being generated" : step.Web?.Problem ?? "it isn't in the web page (a native script covers it)" };
+        }
+
+        return new Web.WebStep
+        {
+            Comment = comment,
+            Playwright = web.Best,
+            Selenium = web.Selenium,
+            Action = step.Action switch
+            {
+                RecordedAction.DoubleClick => Web.WebAction.DoubleClick,
+                RecordedAction.RightClick => Web.WebAction.RightClick,
+                RecordedAction.SetValue => Web.WebAction.Fill,
+                RecordedAction.TypeText => Web.WebAction.Type,
+                RecordedAction.PressKey => Web.WebAction.Press,
+                RecordedAction.CheckText => step.CheckSource == TextSource.Value ? Web.WebAction.CheckValue : Web.WebAction.CheckText,
+                RecordedAction.CheckExists => Web.WebAction.CheckExists,
+                _ => Web.WebAction.Click,
+            },
+            Text = step.Text,
+            SecretName = script.SecretNames.GetValueOrDefault(step.Id),
+            Key = step.Key,
+            Repeat = step.Repeat,
+        };
     }
 
     /// <summary>The action a recorded left click becomes: the pattern action, or focus for a click into a text field.</summary>
@@ -41,6 +92,12 @@ public static class RecordingScripts
             foreach (var step in steps.Where(s => s.IsSecret)) SecretNames[step.Id] = $"UIINSPECTOR_SECRET_{++secret}";
             Apps = steps.Select(s => s.Selector?.ProcessName ?? s.Target.ProcessName).Where(n => n.Length > 0).Distinct().ToList();
             LaunchPath = steps.Select(s => s.Selector?.ProcessPath).FirstOrDefault(p => !string.IsNullOrEmpty(p));
+            // Squirrel apps (Discord, Slack…): the versioned exe moves with every update; Update.exe starts the current one.
+            if (LaunchPath is not null && Web.WebApps.Squirrel(new Web.WebAppLaunch(Web.WebAppKind.Electron, LaunchPath, "")) is { SquirrelExe: { } exe } squirrel)
+            {
+                LaunchPath = squirrel.ExePath;
+                LaunchArguments = ["--processStart", exe];
+            }
             UsesNames = steps.Any(s => s.ChosenSelector is { } sel && sel.Steps.Prepend(sel.Window).Any(st => st.Get(SelectorProperty.Name) is not null));
         }
 
@@ -51,6 +108,8 @@ public static class RecordingScripts
         public IReadOnlyList<string> Apps { get; }
 
         public string? LaunchPath { get; }
+
+        public IReadOnlyList<string> LaunchArguments { get; } = [];
 
         public bool UsesNames { get; }
 
@@ -99,7 +158,8 @@ public static class RecordingScripts
     {
         var sb = new StringBuilder();
         sb.AppendLine("// NuGet: FlaUI.UIA3");
-        Header(sb, "//", script, $"FlaUI.Core.Application.Launch(@\"{script.LaunchPath?.Replace("\"", "\"\"")}\");");
+        var launchArguments = script.LaunchArguments.Count == 0 ? "" : $", {Cs(string.Join(' ', script.LaunchArguments))}";
+        Header(sb, "//", script, $"FlaUI.Core.Application.Launch(@\"{script.LaunchPath?.Replace("\"", "\"\"")}\"{launchArguments});");
         sb.AppendLine("using FlaUI.Core.AutomationElements;");
         sb.AppendLine("using FlaUI.Core.Definitions;");
         sb.AppendLine("using FlaUI.Core.Input;");
@@ -211,7 +271,7 @@ public static class RecordingScripts
     {
         var sb = new StringBuilder();
         sb.AppendLine("# pip install uiautomation");
-        Header(sb, "#", script, $"subprocess.Popen(r'{script.LaunchPath}')");
+        Header(sb, "#", script, $"subprocess.Popen([r'{script.LaunchPath}'{string.Concat(script.LaunchArguments.Select(a => ", " + Py(a)))}])");
         sb.AppendLine("import os");
         sb.AppendLine("import uiautomation as auto");
         sb.AppendLine();
@@ -329,7 +389,9 @@ public static class RecordingScripts
     {
         var sb = new StringBuilder();
         sb.AppendLine("# pip install pywinauto");
-        Header(sb, "#", script, $"Application(backend=\"uia\").start(r'{script.LaunchPath}')");
+        Header(sb, "#", script, script.LaunchArguments.Count == 0
+            ? $"Application(backend=\"uia\").start(r'{script.LaunchPath}')"
+            : $"Application(backend=\"uia\").start(r'\"{script.LaunchPath}\" {string.Join(' ', script.LaunchArguments)}')");
         sb.AppendLine("import os");
         sb.AppendLine("from pywinauto import Desktop");
         sb.AppendLine();

@@ -90,8 +90,10 @@
             </DockPanel>
         </Border>
 
-        <!-- Main area -->
-        <Grid Margin="10">
+        <!-- Main area: the inspector, and the bug report across the whole window -->
+        <TabControl Margin="6,6,6,0" AutomationProperties.AutomationId="MainTabs">
+        <TabItem Header="Inspector" AutomationProperties.AutomationId="InspectorTab">
+        <Grid Margin="4,6,4,4">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="5*" MinWidth="260"/>
                 <ColumnDefinition Width="6"/>
@@ -302,6 +304,9 @@
                                         Content="Delete step" AutomationProperties.AutomationId="DeleteStepButton"/>
                                 <Button Style="{StaticResource ToolButton}" Command="{Binding ClearCommand}"
                                         Content="Clear" AutomationProperties.AutomationId="ClearStepsButton"/>
+                                <CheckBox VerticalAlignment="Center" Margin="4,0,0,0" IsChecked="{Binding CaptureScreenshots}"
+                                          Content="Screenshots" AutomationProperties.AutomationId="CaptureScreenshotsCheckBox"
+                                          ToolTip="Takes a picture of the app's window (only that window) at each step, for the bug report"/>
                             </WrapPanel>
                             <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{StaticResource MutedBrush}"
                                        AutomationProperties.AutomationId="RecorderStatus"/>
@@ -366,5 +371,126 @@
                 </TabControl>
             </DockPanel>
         </Grid>
+        </TabItem>
+
+        <TabItem Header="Bug report" AutomationProperties.AutomationId="BugReportTab" DataContext="{Binding BugReport}">
+            <Grid Margin="4,6,4,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="370" MinWidth="300"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="*" MinWidth="300"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- What the tester writes, and what goes into the report -->
+                <DockPanel Grid.Column="0">
+                    <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
+                        <WrapPanel>
+                            <Button Style="{StaticResource ToolButton}" Content="Save HTML…" Command="{Binding SaveHtmlCommand}"
+                                    AutomationProperties.AutomationId="SaveHtmlButton"
+                                    ToolTip="One file with everything, screenshots included: ready to attach or e-mail"/>
+                            <Button Style="{StaticResource ToolButton}" Content="Save Markdown…" Command="{Binding SaveMarkdownCommand}"
+                                    AutomationProperties.AutomationId="SaveMarkdownButton"
+                                    ToolTip="A .md file plus a folder with the screenshots"/>
+                            <Button Style="{StaticResource ToolButton}" Content="Copy as text" Command="{Binding CopyTextCommand}"
+                                    AutomationProperties.AutomationId="CopyReportTextButton"
+                                    ToolTip="Markdown text without images, to paste into Jira, Azure DevOps or GitHub"/>
+                        </WrapPanel>
+                        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}"
+                                   AutomationProperties.AutomationId="BugReportStatus"/>
+                    </StackPanel>
+
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+                        <StackPanel>
+                            <StackPanel.Resources>
+                                <Style TargetType="TextBlock" x:Key="FieldLabel">
+                                    <Setter Property="Margin" Value="0,8,0,3"/>
+                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                </Style>
+                                <Style TargetType="CheckBox">
+                                    <Setter Property="Margin" Value="0,3"/>
+                                </Style>
+                                <Style TargetType="StackPanel" x:Key="SubOptions">
+                                    <Setter Property="Margin" Value="22,0,0,2"/>
+                                </Style>
+                            </StackPanel.Resources>
+
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Title" Margin="0,0,0,3"/>
+                            <TextBox Text="{Binding Title}" AutomationProperties.AutomationId="ReportTitle" AutomationProperties.Name="Title" Padding="3"/>
+
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Severity"/>
+                            <ComboBox ItemsSource="{Binding Severities}" SelectedItem="{Binding Severity}" HorizontalAlignment="Left" MinWidth="140"
+                                      AutomationProperties.AutomationId="ReportSeverity" AutomationProperties.Name="Severity"/>
+
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Expected result"/>
+                            <TextBox Text="{Binding Expected}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" Padding="3"
+                                     AutomationProperties.AutomationId="ReportExpected" AutomationProperties.Name="Expected result"/>
+
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Actual result"/>
+                            <TextBox Text="{Binding Actual}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" Padding="3"
+                                     AutomationProperties.AutomationId="ReportActual" AutomationProperties.Name="Actual result"/>
+
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Notes"/>
+                            <TextBox Text="{Binding Notes}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="40" Padding="3"
+                                     AutomationProperties.AutomationId="ReportNotes" AutomationProperties.Name="Notes"/>
+
+                            <TextBlock Style="{StaticResource FieldLabel}" Text="Include in the report" Margin="0,14,0,3"/>
+                            <CheckBox Content="Steps to reproduce" IsChecked="{Binding IncludeSteps}" AutomationProperties.AutomationId="IncludeSteps"/>
+                            <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeSteps}">
+                                <CheckBox Content="Screenshots" IsChecked="{Binding IncludeScreenshots}" AutomationProperties.AutomationId="IncludeScreenshots"/>
+                                <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeScreenshots}">
+                                    <CheckBox Content="Outline the element of each step" IsChecked="{Binding HighlightElement}" AutomationProperties.AutomationId="HighlightElement"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <CheckBox Content="Expected and actual result" IsChecked="{Binding IncludeExpectedActual}" AutomationProperties.AutomationId="IncludeExpectedActual"/>
+                            <CheckBox Content="Severity" IsChecked="{Binding IncludeSeverity}" AutomationProperties.AutomationId="IncludeSeverity"/>
+                            <CheckBox Content="Notes" IsChecked="{Binding IncludeNotes}" AutomationProperties.AutomationId="IncludeNotes"/>
+                            <CheckBox Content="Environment" IsChecked="{Binding IncludeEnvironment}" AutomationProperties.AutomationId="IncludeEnvironment"/>
+                            <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeEnvironment}">
+                                <CheckBox Content="Windows version" IsChecked="{Binding IncludeWindowsVersion}" AutomationProperties.AutomationId="IncludeWindowsVersion"/>
+                                <CheckBox Content="App name and version" IsChecked="{Binding IncludeAppVersion}" AutomationProperties.AutomationId="IncludeAppVersion"/>
+                                <CheckBox Content="App install path" IsChecked="{Binding IncludeAppPath}" AutomationProperties.AutomationId="IncludeAppPath"/>
+                                <CheckBox Content="Screens and scaling" IsChecked="{Binding IncludeScreens}" AutomationProperties.AutomationId="IncludeScreens"/>
+                                <CheckBox Content="Language" IsChecked="{Binding IncludeLanguage}" AutomationProperties.AutomationId="IncludeLanguage"/>
+                                <CheckBox Content="Date and time" IsChecked="{Binding IncludeDateTime}" AutomationProperties.AutomationId="IncludeDateTime"/>
+                            </StackPanel>
+                            <CheckBox Content="Element details (selectors, for developers)" IsChecked="{Binding IncludeElementDetails}" AutomationProperties.AutomationId="IncludeElementDetails"/>
+                            <CheckBox Content="Automation script that reproduces it" IsChecked="{Binding IncludeScript}" AutomationProperties.AutomationId="IncludeScript"/>
+                            <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeScript}">
+                                <ComboBox ItemsSource="{Binding ScriptLanguages}" SelectedItem="{Binding SelectedScriptLanguage}" HorizontalAlignment="Left" MinWidth="200"
+                                          AutomationProperties.AutomationId="ReportScriptLanguage" AutomationProperties.Name="Script language" Margin="0,3"/>
+                            </StackPanel>
+
+                            <StackPanel Visibility="{Binding HasScreenshots, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Screenshots per step" Margin="0,14,0,0"/>
+                                <TextBlock Text="Untick any that show something private." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,3"/>
+                                <ItemsControl ItemsSource="{Binding StepScreenshots}" IsEnabled="{Binding IncludeScreenshots}"
+                                              AutomationProperties.AutomationId="StepScreenshots" AutomationProperties.Name="Screenshots per step">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate DataType="{x:Type local:StepScreenshotChoice}">
+                                            <CheckBox IsChecked="{Binding Include}" Margin="0,2">
+                                                <TextBlock Text="{Binding Label}" TextWrapping="Wrap"/>
+                                            </CheckBox>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+
+                <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                <!-- The preview shows the exact HTML that Save HTML writes -->
+                <DockPanel Grid.Column="2">
+                    <TextBlock DockPanel.Dock="Top" Margin="2,0,0,6">
+                        <Run Text="Preview" FontWeight="SemiBold"/><Run Text="  exactly what Save HTML writes" Foreground="{StaticResource MutedBrush}"/>
+                    </TextBlock>
+                    <Border BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1">
+                        <WebBrowser x:Name="PreviewBrowser" AutomationProperties.AutomationId="ReportPreview" AutomationProperties.Name="Report preview"/>
+                    </Border>
+                </DockPanel>
+            </Grid>
+        </TabItem>
+        </TabControl>
     </DockPanel>
 </Window>

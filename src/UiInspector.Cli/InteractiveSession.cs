@@ -110,7 +110,12 @@ public sealed class InteractiveSession(InspectionService service, ElementInspect
             return;
         }
 
-        var script = recorder.RenderScripts().First(s => s.Id == options.Language);
+        var scripts = recorder.RenderScripts();
+        var script = scripts.FirstOrDefault(s => s.Id == options.Language) ?? scripts[0];
+        if (script.Id != options.Language)
+        {
+            renderer.Warning($"No {options.Language} script: Playwright and Selenium need steps inside a web page. Showing {script.Title} instead.");
+        }
         if (options.OutFile is { } path)
         {
             try

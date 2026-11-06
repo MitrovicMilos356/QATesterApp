@@ -404,6 +404,31 @@ public class RecordingScriptTests
         Assert.Contains("Set the UIINSPECTOR_SECRET_1 environment variable", code);
     }
 
+    // Discord: the versioned app-1.0.9267\Discord.exe moves with every update; Update.exe doesn't.
+    [Fact]
+    public void LaunchHint_UsesUpdateExeForSquirrelApps()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "uiinspector-squirrel-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(root, "app-1.0.9267"));
+        File.WriteAllText(Path.Combine(root, "app-1.0.9267", "Discord.exe"), "");
+        File.WriteAllText(Path.Combine(root, "Update.exe"), "");
+        try
+        {
+            var step = Step(1, RecordedAction.Click, Fake.Path("Button", "Save", patterns: ["Invoke"]), "save");
+            step = step with { Selector = step.Selector! with { ProcessPath = Path.Combine(root, "app-1.0.9267", "Discord.exe") } };
+            var scripts = RecordingScripts.Render([step]);
+
+            var update = Path.Combine(root, "Update.exe");
+            Assert.Contains($"FlaUI.Core.Application.Launch(@\"{update}\", \"--processStart Discord.exe\");", scripts.Single(s => s.Id == "flaui").Code);
+            Assert.Contains($"subprocess.Popen([r'{update}', '--processStart', 'Discord.exe'])", scripts.Single(s => s.Id == "uiautomation").Code);
+            Assert.DoesNotContain("app-1.0.9267", scripts.Single(s => s.Id == "pywinauto").Code);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public void TypedText_IsEscapedForKeySyntax()
     {

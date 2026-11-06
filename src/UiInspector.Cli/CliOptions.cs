@@ -24,7 +24,8 @@ public sealed record CliOptions
     public string Language { get; init; } = "flaui";
     public string? OutFile { get; init; }
 
-    public static readonly string[] Languages = ["flaui", "uiautomation", "pywinauto", "appium"];
+    public static readonly string[] Languages =
+        ["flaui", "uiautomation", "pywinauto", "appium", "playwright-js", "playwright-py", "playwright-cs", "selenium-py", "selenium-java"];
 
     public const string Usage = """
         uiinspect - inspect Windows UI elements via UI Automation
@@ -41,7 +42,8 @@ public sealed record CliOptions
           --no-ancestors                Don't walk and print the ancestor chain (not combinable with --code)
           --timeout MS                  Abandon an inspection after MS milliseconds (default 5000)
           --delay MS                    Countdown for the delayed-capture hotkey (default 3000)
-          --lang NAME                   Recorded script language: flaui (default), uiautomation, pywinauto, appium
+          --lang NAME                   Recorded script language: flaui (default), uiautomation, pywinauto, appium;
+                                        for web pages also playwright-js, playwright-py, playwright-cs, selenium-py, selenium-java
           --out FILE                    Write the recorded script to FILE instead of printing it
           -h, --help                    Show this help
 

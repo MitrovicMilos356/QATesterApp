@@ -74,6 +74,18 @@ public sealed partial class RecorderViewModel : ObservableObject
 
     public string RecordButtonText => IsRecording ? "■ Stop" : "● Record";
 
+    /// <summary>Screenshot the app's window at each step, for bug reports.</summary>
+    public bool CaptureScreenshots
+    {
+        get => _recorder.CaptureScreenshots;
+        set
+        {
+            if (_recorder.CaptureScreenshots == value) return;
+            _recorder.CaptureScreenshots = value;
+            OnPropertyChanged();
+        }
+    }
+
     public bool HasSteps => Steps.Count > 0;
 
     [RelayCommand]

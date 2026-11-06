@@ -5,6 +5,7 @@ using FlaUI.Core;
 using FlaUI.Core.AutomationElements;
 using FlaUI.Core.EventHandlers;
 using FlaUI.Core.Exceptions;
+using UiInspector.Core.Reporting;
 using UiInspector.Core.Selectors;
 
 namespace UiInspector.Core.Recording;
@@ -35,12 +36,18 @@ public sealed class Recorder : IAsyncDisposable
     private static readonly int OwnProcessId = Environment.ProcessId;
     private static readonly WebContentWaitOptions WebWait = new() { Timeout = TimeSpan.FromSeconds(1.5) };
     private static readonly TimeSpan RetryDelay = TimeSpan.FromMilliseconds(400);
+    private static readonly TimeSpan CaptureTimeout = TimeSpan.FromSeconds(1.5);
+    private static readonly TimeSpan HitTestSettleTime = TimeSpan.FromMilliseconds(20);
 
     private readonly InspectionService _service;
     private readonly ElementInspector _inspector;
     private readonly RecorderOptions _options;
     private readonly UiaWorker _snapshots = new(new UiaWorkerOptions { OperationTimeout = TimeSpan.FromSeconds(3) });
+
+    // Only resolves input at the moment it happens (hit-test, tree snapshot), so it never waits behind other work.
+    private readonly UiaWorker _atInput = new(new UiaWorkerOptions { OperationTimeout = TimeSpan.FromSeconds(3) });
     private readonly Lock _gate = new();
+    private readonly Dictionary<int, TreeSnapshot> _clickTrees = [];
     private readonly StepBuilder _builder;
     private readonly TextTracker _text = new();
     private readonly Channel<object> _events = Channel.CreateUnbounded<object>(new UnboundedChannelOptions { SingleReader = true });
@@ -72,6 +79,12 @@ public sealed class Recorder : IAsyncDisposable
 
     public bool IsRecording { get; private set; }
 
+    /// <summary>Take a screenshot of the app's window for each step (used by bug reports).</summary>
+    public bool CaptureScreenshots { get; set; } = true;
+
+    /// <summary>When the first recording started (since the last Clear).</summary>
+    public DateTime? StartedAt { get; private set; }
+
     public IReadOnlyList<RecordedStep> Steps
     {
         get
@@ -94,7 +107,7 @@ public sealed class Recorder : IAsyncDisposable
         try
         {
             _input = _options.InputFactory();
-            _input.Start(e => _events.Writer.TryWrite(e));
+            _input.Start(e => _events.Writer.TryWrite(AtInputTime(e)));
         }
         catch
         {
@@ -105,6 +118,7 @@ public sealed class Recorder : IAsyncDisposable
         }
 
         IsRecording = true;
+        StartedAt ??= DateTime.Now;
         Changed?.Invoke();
     }
 
@@ -125,13 +139,22 @@ public sealed class Recorder : IAsyncDisposable
 
     public void Remove(int stepId)
     {
-        lock (_gate) _builder.Remove(stepId);
+        lock (_gate)
+        {
+            _builder.Remove(stepId);
+            _clickTrees.Remove(stepId);
+        }
         Changed?.Invoke();
     }
 
     public void Clear()
     {
-        lock (_gate) _builder.Clear();
+        lock (_gate)
+        {
+            _builder.Clear();
+            _clickTrees.Clear();
+        }
+        StartedAt = IsRecording ? DateTime.Now : null;
         Changed?.Invoke();
     }
 
@@ -214,10 +237,12 @@ public sealed class Recorder : IAsyncDisposable
 
     private Task HandleAsync(object e) => e switch
     {
-        RawMouse { Down: true } m => OnMouseDownAsync(m),
+        ClickAtInput c => OnMouseDownAsync(c),
+        KeyAtInput k => OnKeyAsync(k.Key, k.Resolved),
+        RawMouse { Down: true } m => OnMouseDownAsync(new ClickAtInput(m, ResolveAsync(a => ResolveClick(a, m)))),
         RawMouse m => OnMouseUp(m),
         RawTyping => OnTyping(),
-        RawKey k => OnKeyAsync(k),
+        RawKey k => OnKeyAsync(k, null),
         FocusEvent f => OnFocusAsync(f.Element),
         ElementClick c => OnElementClickAsync(c),
         CheckRequest c => OnCheckAsync(c),
@@ -244,11 +269,14 @@ public sealed class Recorder : IAsyncDisposable
         return Task.CompletedTask;
     }
 
-    private async Task OnMouseDownAsync(RawMouse m)
+    private async Task OnMouseDownAsync(ClickAtInput click)
     {
-        var tracked = _text.Field;
-        var (hit, focused, trackedText) = await _snapshots.RunAsync(a =>
-            (_inspector.InspectAtPoint(a, m.Position), FocusedField(a), ReadText(tracked)), _lifetime.Token);
+        var m = click.Mouse;
+        var at = await click.Resolved; // the element, tree and screenshot captured when the button went down
+        var hit = at.Hit;
+        var tree = at.Tree;
+        var path = at.Path;
+        var image = at.Image;
 
         if (hit is { WebContentPending: true })
         {
@@ -256,40 +284,146 @@ public sealed class Recorder : IAsyncDisposable
             hit = await InspectionService.WaitForWebContentAsync(
                 ct => _snapshots.RunAsync(a => _inspector.InspectAtPoint(a, m.Position), ct), WebWait, null, _lifetime.Token);
             if (hit is { WebContentPending: true }) Notice?.Invoke("The web page hadn't exposed its content yet, so that click wasn't recorded. Click again.");
+            path = hit is { WebContentPending: false } ? ClickPath(hit) : null;
+            (tree, image) = (null, null);
         }
 
-        var entries = _text.Update(focused, trackedText);
-        var path = hit is { WebContentPending: false } ? ClickPath(hit) : null;
+        var entries = _text.Update(at.Focused, await TrackedTextAsync(at.Focused));
+        var (textShots, shot) = await ScreenshotsAsync(entries, path, image);
         Apply(b =>
         {
-            var ids = entries.Select(b.AddText).ToList();
-            if (path is not null) ids.Add(b.AddClick(path, m.Button, m.Position, m.Time));
+            var ids = AddTexts(b, entries, textShots);
+            if (path is not null) ids.Add(Remember(b.AddClick(path, m.Button, m.Position, m.Time, shot), tree));
             else b.IgnoreDown();
             return ids;
         }, path?[^1]);
     }
 
+    /// <summary>
+    /// The tracked field's text: as read when the button or key went down if that was the focused
+    /// field (the app may have moved focus since), otherwise read now.
+    /// </summary>
+    private async Task<string?> TrackedTextAsync(FieldState? focusedAtInput)
+    {
+        var tracked = _text.Field;
+        if (tracked is null) return null;
+        if (focusedAtInput is not null && focusedAtInput.Element.IsSameElement(tracked.Element)) return focusedAtInput.Text;
+        return await _snapshots.RunAsync(_ => ReadText(tracked), _lifetime.Token);
+    }
+
+    // ---------------------------------------------------------------- captured at the moment of input
+
+    /// <summary>What the UI looked like the moment a button or key went down.</summary>
+    private sealed record AtInput(InspectionResult? Hit, IReadOnlyList<ElementInfo>? Path, TreeSnapshot? Tree, FieldState? Focused, WindowImage? Image);
+
+    private sealed record ClickAtInput(RawMouse Mouse, Task<AtInput> Resolved);
+
+    private sealed record KeyAtInput(RawKey Key, Task<AtInput> Resolved);
+
+    /// <summary>
+    /// Runs on the hook thread for every event, so it only starts work. A click (or shortcut key) is
+    /// resolved right away on a worker of its own, so it never waits behind the previous step's
+    /// screenshots and checks; by then the app may have closed the popup that was clicked.
+    /// </summary>
+    private object AtInputTime(RawInput input) => input switch
+    {
+        RawMouse { Down: true } m => new ClickAtInput(m, ResolveAsync(a => ResolveClick(a, m))),
+        RawKey { Kind: KeyKind.Step } k => new KeyAtInput(k, ResolveAsync(ResolveKey)),
+        _ => input,
+    };
+
+    private async Task<AtInput> ResolveAsync(Func<AutomationBase, AtInput> resolve)
+    {
+        var at = await _atInput.RunAsync(resolve, _lifetime.Token);
+        if (at.Path is null || !CaptureScreenshots) return at;
+        var handle = WindowHandle(at.Path);
+        return handle == IntPtr.Zero ? at : at with { Image = await CaptureAsync(handle) };
+    }
+
+    private AtInput ResolveClick(AutomationBase automation, RawMouse m)
+    {
+        var hit = HitTest(automation, m.Position);
+        var path = hit is { WebContentPending: false } ? ClickPath(hit) : null;
+        // The window's tree as it is now, before the app reacts to the click (it may close a popup).
+        var tree = path is null ? null : TryCaptureTree(automation, path);
+        return new AtInput(hit, path, tree, FocusedField(automation), null);
+    }
+
+    /// <summary>
+    /// Chromium answers a hit-test at once from its cache (the last precise result, if it contains
+    /// the point: often a container as big as the page) and works out the precise element in the
+    /// background, in about 15 ms. The next question gets that answer, which describes the page as
+    /// it was at the first question. So: ask, wait 20 ms, ask again, and use the second answer. That
+    /// has to happen before the button comes up and the app changes the page (~80 ms on a fast
+    /// click), so it's done before anything else.
+    /// </summary>
+    private InspectionResult? HitTest(AutomationBase automation, Point point)
+    {
+        var quick = automation.FromPoint(point);
+        if (quick?.Properties.FrameworkId.ValueOrDefault != "Chrome") return _inspector.InspectAtPoint(automation, point);
+
+        Thread.Sleep(HitTestSettleTime);
+        var hit = _inspector.InspectAtPoint(automation, point);
+        if (hit is not null && IsBigContainer(hit))
+        {
+            // Rarely the renderer is slower; one more short wait, still before a fast click ends.
+            Thread.Sleep(HitTestSettleTime);
+            hit = _inspector.InspectAtPoint(automation, point) ?? hit;
+        }
+        return hit;
+    }
+
+    // An unnamed element without actions that covers much of its window: what a cache guess looks like.
+    private static bool IsBigContainer(InspectionResult hit)
+    {
+        var e = hit.Element;
+        if (e.Name.Trim().Length > 0 || e.Patterns.Any(p => p is "Invoke" or "Toggle" or "SelectionItem" or "Value")) return false;
+        var window = hit.Ancestors.Count >= 2 ? hit.Ancestors[^2].BoundingRectangle : e.BoundingRectangle;
+        long area = (long)e.BoundingRectangle.Width * e.BoundingRectangle.Height;
+        long windowArea = (long)window.Width * window.Height;
+        return windowArea > 0 && area * 4 >= windowArea;
+    }
+
+    private AtInput ResolveKey(AutomationBase automation)
+    {
+        var element = FocusedElement(automation);
+        var inspection = element is null ? null : _inspector.InspectElement(automation, element);
+        var path = inspection is null || inspection.Element.ProcessId == OwnProcessId || inspection.AncestorsTruncated ? null : Chain(inspection);
+        if (path is { Count: < 2 }) path = null;
+        // Keys like Escape close popups too; keep the tree as it was when the key went down.
+        var tree = path is null ? null : TryCaptureTree(automation, path);
+        return new AtInput(inspection, path, tree, inspection is null ? null : Field(inspection), null);
+    }
+
+    private static IntPtr WindowHandle(IReadOnlyList<ElementInfo> path) =>
+        path.Skip(1).Select(e => e.NativeWindowHandle).FirstOrDefault(h => h != IntPtr.Zero);
+
     private async Task OnElementClickAsync(ElementClick c)
     {
         var tracked = _text.Field;
-        var (hit, focused, trackedText) = await _snapshots.RunAsync(a =>
-            (_inspector.InspectElement(a, c.Element), FocusedField(a), ReadText(tracked)), _lifetime.Token);
+        var (hit, tree, focused, trackedText) = await _snapshots.RunAsync(a =>
+        {
+            var hit = _inspector.InspectElement(a, c.Element);
+            var tree = hit is not null && ClickPath(hit) is { } clicked ? TryCaptureTree(a, clicked) : null;
+            return (hit, tree, FocusedField(a), ReadText(tracked));
+        }, _lifetime.Token);
 
         var entries = _text.Update(focused, trackedText);
         var path = hit is null ? null : ClickPath(hit);
         var center = hit is null ? Point.Empty : new Point(
             hit.Element.BoundingRectangle.X + hit.Element.BoundingRectangle.Width / 2,
             hit.Element.BoundingRectangle.Y + hit.Element.BoundingRectangle.Height / 2);
+        var (textShots, shot) = await ScreenshotsAsync(entries, path);
         Apply(b =>
         {
-            var ids = entries.Select(b.AddText).ToList();
-            if (path is not null) ids.Add(b.AddClick(path, c.Button, center, c.Time));
+            var ids = AddTexts(b, entries, textShots);
+            if (path is not null) ids.Add(Remember(b.AddClick(path, c.Button, center, c.Time, shot), tree));
             else b.IgnoreDown();
             return ids;
         }, path?[^1]);
     }
 
-    private async Task OnKeyAsync(RawKey k)
+    private async Task OnKeyAsync(RawKey k, Task<AtInput>? early)
     {
         // Arrows, Delete, Space… edit text inside a field; elsewhere they're actions (move in a list, delete a file).
         if (k.Kind == KeyKind.StepUnlessTextField && _text.Field is not null)
@@ -304,21 +438,16 @@ public sealed class Recorder : IAsyncDisposable
             return;
         }
 
-        var tracked = _text.Field;
-        var (focus, field, trackedText) = await _snapshots.RunAsync(a =>
-        {
-            var element = FocusedElement(a);
-            var inspection = element is null ? null : _inspector.InspectElement(a, element);
-            return (inspection, inspection is null ? null : Field(inspection), ReadText(tracked));
-        }, _lifetime.Token);
-
-        var entries = _text.Update(field, trackedText);
-        var path = focus is null || focus.Element.ProcessId == OwnProcessId || focus.AncestorsTruncated ? null : Chain(focus);
-        if (path is { Count: < 2 }) path = null;
+        // Shortcut keys were resolved when they went down; other keys are resolved now.
+        var at = early is not null ? await early : await _snapshots.RunAsync(ResolveKey, _lifetime.Token);
+        var tree = at.Tree;
+        var path = at.Path;
+        var entries = _text.Update(at.Focused, await TrackedTextAsync(at.Focused));
+        var (textShots, shot) = await ScreenshotsAsync(entries, path, at.Image);
         Apply(b =>
         {
-            var ids = entries.Select(b.AddText).ToList();
-            if (path is not null) ids.Add(b.AddKey(path, k.Chord));
+            var ids = AddTexts(b, entries, textShots);
+            if (path is not null) ids.Add(Remember(b.AddKey(path, k.Chord, shot), tree));
             return ids;
         }, path?[^1]);
     }
@@ -332,7 +461,8 @@ public sealed class Recorder : IAsyncDisposable
             return (inspection is null ? null : Field(inspection), ReadText(tracked));
         }, _lifetime.Token);
         var entries = _text.Update(field, trackedText);
-        Apply(b => entries.Select(b.AddText).ToList(), null);
+        var (textShots, _) = await ScreenshotsAsync(entries, null);
+        Apply(b => AddTexts(b, entries, textShots), null);
     }
 
     private async Task OnCheckAsync(CheckRequest request)
@@ -349,10 +479,11 @@ public sealed class Recorder : IAsyncDisposable
         var path = hit is null || hit.Element.ProcessId == OwnProcessId || hit.AncestorsTruncated ? null : SmartPath(hit);
         if (path is { Count: < 2 }) path = null;
         if (path is null) Notice?.Invoke("No element of another app under the cursor to check.");
+        var (textShots, shot) = await ScreenshotsAsync(entries, path);
         Apply(b =>
         {
-            var ids = entries.Select(b.AddText).ToList();
-            if (path is not null) ids.Add(b.AddCheck(path, text, source));
+            var ids = AddTexts(b, entries, textShots);
+            if (path is not null) ids.Add(b.AddCheck(path, text, source, shot));
             return ids;
         }, path?[^1]);
     }
@@ -362,7 +493,69 @@ public sealed class Recorder : IAsyncDisposable
         var tracked = _text.Field;
         var (focused, trackedText) = await _snapshots.RunAsync(a => (FocusedField(a), ReadText(tracked)), _lifetime.Token);
         var entries = _text.Update(focused, trackedText);
-        Apply(b => entries.Select(b.AddText).ToList(), null);
+        var (textShots, _) = await ScreenshotsAsync(entries, null);
+        Apply(b => AddTexts(b, entries, textShots), null);
+    }
+
+    /// <summary>Keeps the tree taken at the click for the step's selector check (under the lock).</summary>
+    private int? Remember(int? stepId, TreeSnapshot? tree)
+    {
+        if (stepId is { } id && tree is not null) _clickTrees[id] = tree;
+        return stepId;
+    }
+
+    private static TreeSnapshot? TryCaptureTree(AutomationBase automation, IReadOnlyList<ElementInfo> path)
+    {
+        try
+        {
+            return TreeSnapshot.Capture(automation, path);
+        }
+        catch (Exception ex) when (ex is COMException or FlaUIException or InvalidOperationException)
+        {
+            return null; // the selector is then checked live, as before
+        }
+    }
+
+    private static List<int?> AddTexts(StepBuilder builder, IReadOnlyList<TextEntry> entries, IReadOnlyList<StepScreenshot?> shots) =>
+        entries.Select((entry, i) => builder.AddText(entry, shots[i])).ToList();
+
+    // ---------------------------------------------------------------- screenshots
+
+    /// <summary>
+    /// Screenshots for the steps one event produces: each window is captured once, then every
+    /// step gets its own element outlined. Empty when screenshots are switched off.
+    /// </summary>
+    private async Task<(IReadOnlyList<StepScreenshot?> Texts, StepScreenshot? Action)> ScreenshotsAsync(
+        IReadOnlyList<TextEntry> entries, IReadOnlyList<ElementInfo>? actionPath, WindowImage? capturedAtInput = null)
+    {
+        if (!CaptureScreenshots || (entries.Count == 0 && actionPath is null)) return (entries.Select(_ => (StepScreenshot?)null).ToList(), null);
+
+        var windows = new Dictionary<IntPtr, WindowImage?>();
+        if (actionPath is not null && capturedAtInput is not null) windows[WindowHandle(actionPath)] = capturedAtInput;
+        async Task<StepScreenshot?> ShotAsync(IReadOnlyList<ElementInfo> path)
+        {
+            var handle = path.Skip(1).Select(e => e.NativeWindowHandle).FirstOrDefault(h => h != IntPtr.Zero);
+            if (handle == IntPtr.Zero) return null;
+            if (!windows.TryGetValue(handle, out var image)) windows[handle] = image = await CaptureAsync(handle);
+            return image is null ? null : WindowCapture.Mark(image, path[^1].BoundingRectangle);
+        }
+
+        var texts = new List<StepScreenshot?>();
+        foreach (var entry in entries) texts.Add(await ShotAsync(entry.Field.Path));
+        return (texts, actionPath is null ? null : await ShotAsync(actionPath));
+    }
+
+    // PrintWindow waits for the app to draw itself; a hung app must not stall recording.
+    private static async Task<WindowImage?> CaptureAsync(IntPtr window)
+    {
+        try
+        {
+            return await Task.Run(() => WindowCapture.CaptureWindow(window)).WaitAsync(CaptureTimeout);
+        }
+        catch (Exception ex) when (ex is TimeoutException or ExternalException or ArgumentException or InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     private async Task OnBaselineAsync()
@@ -391,14 +584,20 @@ public sealed class Recorder : IAsyncDisposable
             await foreach (var id in _pending.Reader.ReadAllAsync(_lifetime.Token))
             {
                 IReadOnlyList<ElementInfo>? path;
-                lock (_gate) path = _builder.Find(id)?.Path;
+                TreeSnapshot? tree;
+                lock (_gate)
+                {
+                    path = _builder.Find(id)?.Path;
+                    _clickTrees.Remove(id, out tree);
+                }
                 if (path is null) continue; // removed meanwhile
 
                 SelectorResult? result = null;
                 string? problem;
                 try
                 {
-                    result = await _service.GenerateSelectorAsync(path, _lifetime.Token, includeWeb: false);
+                    // Checked against the UI as it was at the click, so a popup the click closed still counts.
+                    result = await _service.GenerateSelectorAsync(path, _lifetime.Token, includeWeb: false, snapshot: tree);
                     if (result.Best is null)
                     {
                         // A busy app can drop out of one tree search (e.g. while it handles the click
@@ -418,12 +617,43 @@ public sealed class Recorder : IAsyncDisposable
                 }
 
                 var fallback = result?.Best is null ? SelectorGenerator.BuildUnverified(path) : null;
-                lock (_gate) _builder.SetSelector(id, result, fallback, problem);
+                var web = await WebLocatorsAsync(path, result, fallback, tree);
+                lock (_gate) _builder.SetSelector(id, result, fallback, problem, web);
                 Changed?.Invoke();
             }
         }
         catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
         {
+        }
+    }
+
+    /// <summary>
+    /// Web locators for a step in a Chromium page. Over a debug port the element is found again in
+    /// the page by its position; if the page changed since the click, that finds another element,
+    /// which shows as a different name. Then the locators built from the accessibility tree are used.
+    /// </summary>
+    private async Task<Web.WebResult?> WebLocatorsAsync(IReadOnlyList<ElementInfo> path, SelectorResult? result, Selector? fallback, TreeSnapshot? tree)
+    {
+        if (path[^1].FrameworkId != "Chrome") return null;
+        var native = result?.Best is not null ? result : result is not null && fallback is not null ? result with { Best = fallback } : null;
+        if (native is null) return null;
+        try
+        {
+            var web = await _service.GenerateWebAsync(path, native, _lifetime.Token, tree);
+            if (web is { Source: Web.WebSource.DevTools } && web.Notes.Any(n => n.Contains("differs from the UIA name", StringComparison.Ordinal)))
+            {
+                var pageUrl = web.PageUrl.Length > 0 ? web.PageUrl : null;
+                return Web.AccessibilityLocators.FromSelector(native, path, pageUrl, web.Launch);
+            }
+            return web;
+        }
+        catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return Web.WebResult.Unavailable(FailureMessages.Describe(ex, null));
         }
     }
 
@@ -559,6 +789,7 @@ public sealed class Recorder : IAsyncDisposable
         {
         }
         _snapshots.Dispose();
+        _atInput.Dispose();
         _lifetime.Dispose();
     }
 }

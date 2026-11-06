@@ -5,7 +5,8 @@ patterns and position in the UI tree, then generates a **verified selector** and
 code for FlaUI (C#), Python `uiautomation`, pywinauto and Appium. For elements inside Chromium
 pages (Electron, WebView2, Chrome, Edge) it also generates **Playwright** (JS, Python, C#) and
 **Selenium** (Python, Java) code from the real DOM. A **recorder** turns a workflow you click
-through into a complete script. This covers Phases 1–4 and the recorder from Phase 5 of
+through into a complete script, and a **bug report** builder turns the same recording into a
+report with steps, screenshots and environment. This covers Phases 1–4 and the recorder from Phase 5 of
 [windows_ui_inspector_spec.md](windows_ui_inspector_spec.md): a desktop GUI and a console tool
 that share one engine.
 
@@ -57,7 +58,8 @@ Selecting any element generates a selector and **checks it against the live app*
 Attributes that would break are rejected or flagged with a reason: generated hashes
 (`content_d125d2`), GUIDs, WinForms per-build class names, window handles used as IDs, designer
 default names (`textBox17`), and live status text inside names (only `Dyno (direct message)` is
-used from `Dyno (direct message), Online`). A **click check** says whether a real mouse click at
+used from `Dyno (direct message), Online`), and times and dates (only `GoAway` from
+`GoAway 11:21 PM`). A **click check** says whether a real mouse click at
 the element's center would reach it, or would hit another window, an overlay, or nothing
 (off-screen). Generated code prefers pattern actions (Invoke, Toggle, SetValue…) over mouse clicks.
 
@@ -65,10 +67,28 @@ Other verified selectors for the same element are in the drop-down above the ste
 
 ### Web apps: Playwright and Selenium code
 
-For an element inside a Chromium page, the inspector connects to the app over the **Chrome
-DevTools Protocol** and reads the page itself: `id`, `data-testid`, ARIA role and accessible name,
-iframes and Shadow DOM. This needs the app to run with a remote-debugging port. Quit the app
-completely first, then start it like this:
+For an element inside a Chromium page (Chrome, Edge, Electron apps like Discord, Slack or VS
+Code, WebView2 apps), the Selector tab and the Recorder also give Playwright (JavaScript, Python,
+C#) and Selenium (Python, Java) code. **No special setup is needed:**
+
+- **Locators come from the accessibility tree.** Chromium shows UI Automation each element's ARIA
+  role, accessible name, HTML `id` and classes, so the inspector builds `getByRole('button', { name: 'Save' })`,
+  `#email-input` and the like from the selector it already verified there. Iframes are entered by
+  their id or title; Shadow DOM is no obstacle for Playwright.
+- **The generated script reaches the app by itself.** For a website it opens its own Edge or Chrome
+  window and goes to the page. For an Electron or WebView2 app it attaches if the app already has a
+  debug port; otherwise it starts the app with one and attaches. Apps that update themselves with
+  Squirrel (Discord, Slack…) are started through their `Update.exe`, so the script survives updates.
+- **Close the app before running such a script**, completely: apps like Discord only hide to the
+  system tray when their window is closed (right-click the tray icon → Quit). A running copy
+  ignores a debug port, so the script checks for one and says so at once instead of waiting.
+- **Clickable areas without a name** (the `<div>`s chat apps are full of) are clicked through a text
+  inside them that appears nowhere else on the page.
+
+**Optional: start the app with a debug port** while inspecting to get more: `data-testid`
+attributes, which are invisible in the accessibility tree, and every locator verified inside the
+page itself. Scripts then attach to the running app. Quit the app completely first, then start it
+like this:
 
 | App | How to start it |
 | :--- | :--- |
@@ -78,7 +98,7 @@ completely first, then start it like this:
 | Chrome / Edge | `msedge.exe --remote-debugging-port=9222 --user-data-dir=C:\temp\edge-debug` |
 
 The port is read from the app's command line automatically; type one into **Debug port** to
-override it. Without a port, the Selector tab explains how to get one.
+override it. The web section of the Selector tab says which way the locators were made.
 
 > **Security:** while the port is open, any program on this computer can fully control the app
 > (read its pages, run script). It only listens on `127.0.0.1`, but close the app when you're done.
@@ -114,16 +134,22 @@ you want to test. Each action becomes a step with a verified selector:
 | `Ctrl+Shift+F7` over an element | A check: the text it shows now must match, or (no text) it must exist |
 
 Stop with the same button or `Ctrl+Shift+F8`. Pick a language (FlaUI, uiautomation, pywinauto,
-Appium), then **Copy script** or **Save…**. **Delete step** removes a step you didn't mean to
+Appium, and for steps inside a web page also Playwright JavaScript/Python/C# and Selenium
+Python/Java), then **Copy script** or **Save…**. **Delete step** removes a step you didn't mean to
 record. Recording again adds steps to the end. Every step finds its element from the desktop
 again and waits up to 10 s, so dialogs and windows that open along the way are waited for.
 
 How it works, and what it doesn't capture:
 
-- Each click is resolved to its element **the moment the button goes down**, before the app reacts.
-  A selector is then generated and verified in the background. If the element is already gone
-  (its dialog closed), the step gets a selector built from the snapshot and is marked
-  **unverified**.
+- Each click is resolved to its element **the moment the button goes down**, before the app reacts,
+  and a **snapshot of the window's whole element tree** is taken at the same moment (about 65 ms
+  for Discord's ~800 elements). The selector is then built and verified against that snapshot, so
+  a click that closes its own popup or dialog gets the same quality of selector as any other: the
+  popup's content still tells its buttons apart. Key steps (Escape closes popups too) work the same
+  way. Without a snapshot, the step is checked live and marked **unverified** if its element is gone.
+- That work starts **straight from the input hook**, on a worker of its own, so a quick click never
+  waits behind the previous step's screenshots and checks (about 0.3 s per click in Discord); by
+  then the app could already have closed what was clicked.
 - **Typed text is never captured as keystrokes.** The keyboard hook reduces every printable key to
   "something was typed"; the text comes from the field itself via UI Automation, when focus
   leaves it or the next action happens. Password fields are never read.
@@ -133,6 +159,34 @@ How it works, and what it doesn't capture:
 - The mouse and keyboard hooks exist only while recording. Input from automation scripts
   (including generated ones) is ignored.
 - Live pick (Ctrl-hover) pauses while recording, so shortcuts like Ctrl+S don't pick elements.
+
+### Bug report: from a recording to a report a developer can act on
+
+Record the steps that lead to the bug, then open the **Bug report** tab. Fill in the title,
+severity, expected and actual result (and notes, if any); the steps, screenshots and environment
+come from the recording. The preview on the right shows exactly what **Save HTML** writes and
+updates as you change anything.
+
+Every part has its own check box:
+
+| Part | Default | What it adds |
+| :--- | :--- | :--- |
+| Steps to reproduce | on | Numbered steps in plain words: *Type “ada” into the “User” field.*, *Click the “Sign in” button.* Passwords appear as "Type the password into…" |
+| ↳ Screenshots | on | The app's window at each step. Untick single steps under **Screenshots per step** if they show something private |
+| ↳ Outline the element | on | A red frame around the element each step acted on |
+| Expected and actual result | on | Side by side; flagged if not filled in |
+| Severity, Notes | on | Shown when set |
+| Environment | on | With its own boxes for Windows version, app name and version, app install path (off by default), screens and scaling, language, date and time |
+| Element details | off | Each step's verified selector, for developers |
+| Automation script | off | The script that replays the steps, in the chosen language |
+
+**Save HTML…** writes one file with everything embedded (ready to attach or e-mail).
+**Save Markdown…** writes a .md file plus a folder with the screenshots. **Copy as text**
+puts Markdown without images on the clipboard, for Jira, Azure DevOps or GitHub.
+
+Screenshots show only the app's own window (it's asked to draw itself), never the screen, so
+other apps and overlapping windows don't appear. Switch them off with **Screenshots** in the
+Recorder tab. The preview files are kept in a temporary folder that's deleted when the app closes.
 
 ## Console tool
 
@@ -208,6 +262,7 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | `src/UiInspector.Core/Selectors` | `AttributeStability` (which values can be trusted), `SelectorGenerator` (build, scope and live-verify selectors; click check), `CodeTemplates` (FlaUI, uiautomation, pywinauto, Appium) |
 | `src/UiInspector.Core/Web` | `CdpSession` (minimal DevTools Protocol client), `DebugPort` (finds `--remote-debugging-port` in the process tree), `PageScript` (in-page locate/count script), `WebBridge` (UIA element → DOM node, Playwright/Selenium locators, verification), `WebCodeTemplates` |
 | `src/UiInspector.Core/Recording` | `InputHook` (low-level mouse/keyboard hooks, only while recording), `KeyClassifier` (decides inside the hook what a key means; printable keys become "typed"), `TextTracker` (what was typed where, from field values), `StepBuilder` (double-clicks, drags, merging), `Recorder` (resolves each click at mouse-down on its own UIA worker, generates selectors in the background), `RecordingScripts` |
+| `src/UiInspector.Core/Reporting` | `WindowCapture` (PrintWindow of one window; element outlines), `EnvironmentInfo` (Windows version, app versions, monitors), `BugReport` (options, step wording), `BugReportRenderer` (HTML, Markdown, text) |
 | `tests/UiInspector.Core.Tests` | Unit tests, plus integration tests (`Category=Desktop`) against `Fixtures/selector_fixture.ps1` (WinForms window with duplicate captions, identical buttons, HWND-based IDs, a check box and a password field) and `Fixtures/web_fixture.html` (opened in Edge: test id, status-in-name links, duplicate captions with hashed classes, labelled input, iframe, Shadow DOM). Both open off-screen. The web tests need Microsoft Edge. The recorder tests feed it element-level events instead of real input, so they never move the mouse or type |
 
 ### Generated code: what has been run
@@ -224,6 +279,10 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | Recorded scripts (FlaUI, uiautomation, pywinauto) | A recorded 6-step workflow (text, password from an environment variable, check box, button, anchored duplicate button, text check) run unedited against a fresh fixture: 3/3 left it in exactly the recorded state and passed their check. Key and mouse steps were checked by unit tests only, since running them would type into or click on whatever is in front |
 | Rows found by their text (FlaUI, uiautomation, pywinauto) | The Delete button of "Order 1042", in a list of rows with no IDs and identical buttons, run against the fixture (3/3), then against a later version of it with a new row on top and the rows reordered: 3/3 still deleted Order 1042. The old position-based selector deleted Order 1043 there, without any error |
 | Web rows found by their text (Playwright JS/Python/C#, Selenium Python) | The Delete button of "Order 1042" in React-style rows (no ids, hashed classes), run against the page and against a later version of it (new row on top, rows reordered): 8/8 deleted Order 1042. A position-based locator deleted Order 1043 on the later version, without any error. The earlier 24 web cases still pass |
+| Web code without a debug port | Locators built from the accessibility tree for the 8 web fixture cases (including an unnamed clickable tile), with each script opening its own (headless) Edge: Playwright JS/Python/C# 24/24, Selenium Python 7/8. The miss is the Shadow DOM button: Selenium's XPath can't look inside Shadow DOM, and without a port the inspector can't tell it's there (Playwright handles it). A recorded web workflow (fill, delete order 1042, check): 4/4. Scripts that start the app with a port themselves, with a stand-in Electron launcher: 4/4; with "the app" already running without a port, the script stops after 4 s with the "quit it completely" message. The 24 debug-port cases still pass |
+| Bug report | A report built from the recorded 6-step workflow, rendered in Edge: every screenshot shows the window as it was at that step (typed text, password dots, check box before and after). Each option checked by tests to add or remove its part. In the GUI, driven through UI Automation: title and severity reach the preview, unticking a part removes it, the preview folder is deleted on exit |
+| Clicks that close their popup | A popup with an OK button that closes it, next to another OK: checked against the snapshot taken at the click, its selector is "OK inside the Pane containing *Confirm delete?*", verified. Checked live after the click, the two can't be told apart |
+| Discord (real app, no setup) | A recorded 4-step Playwright script started Discord with a debug port through `Update.exe` and attached. Steps 1–2 ran; step 3 relied on a text that only appears while hovering, which led to the click snapshot above |
 | Recorded scripts (Appium) | Generated and unit-tested, **not run** (no Appium server) |
 | Recorder with real mouse and keyboard | **Not run here**: the hook was installed and removed in a test, but recording real input would have captured the person using this computer. Try it on your apps |
 
@@ -244,7 +303,16 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 - **Iframe content shows up in UIA as a nested `Document #RootWebArea`.** The web bridge uses the outermost one as the page.
 - **WinForms check boxes support both Invoke and Toggle.** Code uses Toggle for check boxes, since it says what the step does.
 - **A WinForms TextBox takes its Name from the label before it** (the fixture's notes box is named "Status: 3 items"). Its AutomationId is what identifies it.
+- **Clicks change the UI faster than a selector can be checked.** Discord starts closing a popup as soon as the mouse button comes up, while checking a selector live takes several searches. Before snapshots, every click that closed a popup lost the popup as an anchor and fell back to a position.
+- **Chromium answers a hit-test at a new point with a guess from its cache**, then works out the precise element in the background (~15 ms); only the next question gets it. In Discord's profile window the first answer for the X button was the whole content panel. The recorder asks at the moment the button goes down, waits 20 ms, and uses the second answer, which describes the page as it was at the click; all before a fast click's button comes up (~80 ms) and the app changes the page. (Asking only after the tree snapshot was too late for fast clicks; warming the cache by hit-testing where the cursor rests made it worse, since a cached big container "contains" every later point.)
+- **Quick clicks used to queue up.** Each click's hit-test, tree snapshot and screenshots ran one after another (~250–300 ms in Discord), so in a fast sequence the last click (closing a profile window) was resolved after the window had faded, landing on the backdrop. Recording with the window already open didn't show it, since that click was first in line. Chromium's positions were checked and were right.
+- **FlaUI's caching tree walker throws instead of returning null** when there's no previous sibling; that walk runs without a cache.
 - **A busy app can drop out of a single tree search**: under load, one selector check right after a recorded click found no window. The recorder retries once before falling back to an unverified selector.
+- **Window screenshots have two modes, each blind in one case.** The compositor's copy (`PW_RENDERFULLCONTENT`) is the only one with Chromium/WPF/WinUI content, but Windows never repaints the parts of a window that are off every monitor, so there it's old or empty. Asking the window to paint itself (plain `PrintWindow`) is current for classic windows but black for DirectX content. Captures use the first for windows fully on screen and the second otherwise, each falling back to the other when the result is blank.
+- **Windows' own programs name the OS as their product** ("Microsoft® Windows® Operating System"), so reports use their file description ("Notepad") instead.
+- **Chromium doesn't always show UI Automation the same tree.** Depending on its accessibility mode it exposes plain `<div>`s (as groups, with their classes) or leaves them out, so rows of a list may exist as elements or their contents may sit side by side. Locators handle both: "the innermost element holding *Order 1042* and a Delete button" (`filter({ has })`), or "the first Delete button after the text *Order 1042*" (`following::`).
+- **Chromium only updates its accessibility tree while it renders**, and it pauses rendering for windows it thinks are hidden, so off-screen test windows need `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding`. Apps on screen aren't affected.
+- **Chromium's document element carries the page URL** as its UI Automation value, which is how scripts know where to go without a debug port.
 - **On web pages, "the div containing this text" isn't specific enough**: every outer wrapper `<div>` contains it too. The locator starts from the element showing exactly that text and goes up to its nearest container (`ancestor::div[1]`).
 - **Chromium can leave plain `<div>`s out of the UIA tree**, so the UIA parent of a label isn't necessarily its row.
 - **The .NET Framework UI Automation client (`System.Windows.Automation`) doesn't see WinForms AutomationIds**, unlike UIA3 (FlaUI, uiautomation). Tools built on it see a different tree.
