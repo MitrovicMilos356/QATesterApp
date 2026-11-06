@@ -159,18 +159,24 @@ public sealed partial class TestabilityViewModel : ObservableObject, IDisposable
     [NotifyCanExecuteChangedFor(nameof(CopyPlanScriptCommand), nameof(SavePlanScriptCommand))]
     private CodeSnippet? _selectedScript;
 
-    public string ScriptText => SelectedScript?.Code ?? (SelectedFeature is null ? "" : "No script for this one: it's checked by hand (see the test cases).");
+    public string ScriptText => SelectedScript?.Code ?? _handCheck ?? (SelectedFeature is null ? "" : "No script for this one: it's checked by hand (see the test cases).");
 
     /// <summary>A file name for the script: test suites follow their runner's naming (login_test.py, login.spec.js).</summary>
     private string ScriptFileName(CodeSnippet script)
     {
-        var slug = string.Join('_', new string((SelectedFeature?.Feature.Title ?? "feature").ToLowerInvariant().Select(ch => char.IsAsciiLetterOrDigit(ch) ? ch : ' ').ToArray())
+        // One case's script is named after the case (login_04_test.py), the suite after the feature.
+        var name = SelectedCase is { } c ? c.Id : SelectedFeature?.Feature.Title ?? "feature";
+        var slug = string.Join('_', new string(name.ToLowerInvariant().Select(ch => char.IsAsciiLetterOrDigit(ch) ? ch : ' ').ToArray())
             .Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(4));
+        // Java needs the file named after its class (C# likes it): read the name from the code itself.
+        var className = System.Text.RegularExpressions.Regex.Match(script.Code, @"^\s*(?:public\s+)?class\s+(\w+)", System.Text.RegularExpressions.RegexOptions.Multiline).Groups[1].Value;
         return script.Id switch
         {
-            "suite-playwright-py" or "suite-uiautomation" => $"{slug}_test.py",
+            "suite-playwright-py" or "suite-uiautomation" or "suite-pywinauto" or "suite-appium" => $"{slug}_test.py",
+            "suite-selenium-py" => $"{slug}_selenium_test.py",
             "suite-playwright-js" => $"{slug}.spec.js",
-            "suite-flaui" => $"{string.Concat(slug.Split('_').Select(w => char.ToUpperInvariant(w[0]) + w[1..]))}Suite.cs",
+            "suite-selenium-java" when className.Length > 0 => $"{className}.java",
+            "suite-flaui" or "suite-playwright-cs" when className.Length > 0 => $"{className}.cs",
             "flaui" or "playwright-cs" => "MainFlow.cs",
             "playwright-js" => "main_flow.js",
             "selenium-java" => "MainFlow.java",
@@ -208,9 +214,7 @@ public sealed partial class TestabilityViewModel : ObservableObject, IDisposable
         FeatureWarnings = string.Join("\n", f.Warnings.Select(w => "⚠ " + w));
         FillCases();
         // The data-driven suites first: they run every case; the main-flow scripts are the starting point for your own.
-        foreach (var s in f.Suites.Concat(f.Scripts)) Scripts.Add(s);
-        SelectedScript = Scripts.FirstOrDefault(s => s.Id == _preferredScriptId) ?? Scripts.FirstOrDefault();
-        OnPropertyChanged(nameof(ScriptText));
+        ShowFeatureScripts();
 
         // Show where it is in the app.
         var control = f.Fields.Select(x => x.Control).FirstOrDefault() ?? f.Action ?? f.Controls.FirstOrDefault();
@@ -220,7 +224,65 @@ public sealed partial class TestabilityViewModel : ObservableObject, IDisposable
     partial void OnSelectedCaseChanged(CaseRow? value)
     {
         if (value?.Case.Target is { } target) _ = OutlineAsync(target.Element, $"{value.Id} · {Format.Clean(FeatureDetector.Label(target.Element), 40)}");
+        if (value is null) ShowFeatureScripts();
+        else ShowCaseScripts(value.Case);
     }
+
+    /// <summary>"Script for LOGIN-07" or "Scripts for the whole feature", above the script box.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsCaseScript))]
+    private string _scriptsHeader = "Scripts";
+
+    /// <summary>The box shows one case's script (the Whole feature button goes back).</summary>
+    public bool IsCaseScript => SelectedCase is not null;
+
+    /// <summary>Shown instead of code when the selected case is checked by hand.</summary>
+    private string? _handCheck;
+
+    // The data-driven suites first: they run every case; the main-flow scripts are the starting point for your own.
+    private void ShowFeatureScripts()
+    {
+        _handCheck = null;
+        Scripts.Clear();
+        if (SelectedFeature is { } feature)
+        {
+            foreach (var s in feature.Feature.Suites.Concat(feature.Feature.Scripts)) Scripts.Add(s);
+        }
+        ScriptsHeader = "Scripts for the whole feature";
+        SelectScript();
+    }
+
+    // One case: its own script in each suite language, or its steps when it's checked by hand.
+    private void ShowCaseScripts(TestCase testCase)
+    {
+        Scripts.Clear();
+        _handCheck = null;
+        if (SelectedFeature is not { } feature || _report?.Plan is not { } plan) return;
+        foreach (var s in TestSuites.ForCase(feature.Feature, testCase, plan.IsWeb)) Scripts.Add(s);
+        if (Scripts.Count == 0)
+        {
+            var why = testCase.Data is not null && testCase.Value is null
+                ? "it needs your app's own value"
+                : "it's about how the app looks or behaves for a person, which a script can't judge";
+            _handCheck = $"{testCase.Id} is checked by hand: {why}.\n\nSteps:\n" +
+                         string.Join("\n", testCase.Steps.Select((s, i) => $"  {i + 1}. {s}")) +
+                         (testCase.Data is null ? "" : $"\nData: {testCase.Data}") +
+                         $"\nExpected: {testCase.Expected}" +
+                         (testCase.IfItFails is null ? "" : $"\nIf it fails: {testCase.IfItFails}");
+        }
+        ScriptsHeader = $"Script for {testCase.Id}";
+        SelectScript();
+    }
+
+    private void SelectScript()
+    {
+        SelectedScript = Scripts.FirstOrDefault(s => s.Id == _preferredScriptId) ?? Scripts.FirstOrDefault();
+        OnPropertyChanged(nameof(ScriptText));
+        OnPropertyChanged(nameof(IsCaseScript));
+    }
+
+    [RelayCommand]
+    private void ShowWholeFeature() => SelectedCase = null;
 
     private int _outlineRequest;
 

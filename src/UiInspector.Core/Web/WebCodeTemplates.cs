@@ -517,9 +517,65 @@ public static class WebCodeTemplates
     /// <summary>The Playwright locator for <paramref name="s"/>, starting from <c>page</c>, in Python or JavaScript (for test suites).</summary>
     internal static string PlaywrightLocator(WebSelector s, bool python) => PwChain(s, "page", python ? PwFlavor.Py : PwFlavor.Js);
 
+    internal static string PlaywrightLocatorCs(WebSelector s) => PwChain(s, "page", PwFlavor.Cs);
+
     internal static string PyString(string value) => Py(value);
 
     internal static string JsString(string value) => Js(value);
+
+    internal static string CsString(string value) => Cs(value);
+
+    internal static string JavaString(string value) => Java(value);
+
+    /// <summary>
+    /// The body of a function that finds the element with Selenium (Python or Java), given
+    /// <c>driver</c> and <c>wait</c>: into its frames and shadow roots first, ending in a return.
+    /// </summary>
+    internal static IEnumerable<string> SeleniumFindBody(SeleniumSelector s, bool java)
+    {
+        string Q(string v) => java ? Java(v) : Py(v);
+        yield return java ? "driver.switchTo().defaultContent();" : "driver.switch_to.default_content()";
+        foreach (var frame in s.Frames)
+        {
+            yield return (frame.Index, java) switch
+            {
+                ({ } fi, false) => $"driver.switch_to.frame(driver.find_elements(By.CSS_SELECTOR, {Q(frame.Value)})[{fi}])",
+                (null, false) => $"driver.switch_to.frame(wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, {Q(frame.Value)}))))",
+                ({ } fi, true) => $"driver.switchTo().frame(driver.findElements(By.cssSelector({Q(frame.Value)})).get({fi}));",
+                _ => $"driver.switchTo().frame(wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector({Q(frame.Value)}))));",
+            };
+        }
+        var scope = "driver";
+        for (var i = 0; i < s.ShadowHosts.Count; i++)
+        {
+            var host = s.ShadowHosts[i];
+            yield return java
+                ? $"SearchContext shadow{i + 1} = wait.until(d -> {(host.Index is { } hi ? $"{scope}.findElements(By.cssSelector({Q(host.Value)})).get({hi})" : $"{scope}.findElement(By.cssSelector({Q(host.Value)}))")}).getShadowRoot();"
+                : $"shadow{i + 1} = wait.until(lambda d: {(host.Index is { } pyIndex ? $"{scope}.find_elements(By.CSS_SELECTOR, {Q(host.Value)})[{pyIndex}]" : $"{scope}.find_element(By.CSS_SELECTOR, {Q(host.Value)})")}).shadow_root";
+            scope = $"shadow{i + 1}";
+        }
+        if (s.ContainerXPath is { } container)
+        {
+            yield return java
+                ? $"WebElement container = wait.until(ExpectedConditions.presenceOfElementLocated(By.xpath({Q(container)})));"
+                : $"container = wait.until(EC.presence_of_element_located((By.XPATH, {Q(container)})))";
+            scope = "container";
+        }
+        var xpath = s.Target.Kind == WebLocatorKind.XPath;
+        var by = java ? (xpath ? "By.xpath" : "By.cssSelector") : (xpath ? "By.XPATH" : "By.CSS_SELECTOR");
+        var value = Q(s.Target.Value);
+        yield return (s.Target.Index, java) switch
+        {
+            ({ } ti, false) => $"return wait.until(lambda d: {scope}.find_elements({by}, {value})[{ti}])",
+            (null, false) => scope == "driver"
+                ? $"return wait.until(EC.presence_of_element_located(({by}, {value})))"
+                : $"return wait.until(lambda d: {scope}.find_element({by}, {value}))",
+            ({ } ti, true) => $"return wait.until(d -> {scope}.findElements({by}({value})).get({ti}));",
+            _ => scope == "driver"
+                ? $"return wait.until(ExpectedConditions.presenceOfElementLocated({by}({value})));"
+                : $"return wait.until(d -> {scope}.findElement({by}({value})));",
+        };
+    }
 
     private static string PwChain(WebSelector s, string start, PwFlavor f)
     {

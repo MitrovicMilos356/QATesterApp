@@ -195,6 +195,14 @@ public class TestabilityTests(TestabilityFixtureWindow fixture) : IClassFixture<
         Directory.CreateDirectory(dir);
         File.WriteAllText(Path.Combine(dir, "desktop_login_test.py"), py);
         File.WriteAllText(Path.Combine(dir, "DesktopLoginSuite.cs"), cs);
+        Assert.Equal(["suite-uiautomation", "suite-flaui", "suite-pywinauto", "suite-appium"], login.Suites.Select(s => s.Id));
+        var pywinauto = login.Suites.Single(s => s.Id == "suite-pywinauto").Code;
+        var appium = login.Suites.Single(s => s.Id == "suite-appium").Code;
+        File.WriteAllText(Path.Combine(dir, "desktop_login_pywinauto_test.py"), pywinauto);
+        File.WriteAllText(Path.Combine(dir, "desktop_login_appium_test.py"), appium);
+        Assert.Contains("auto_id='signInUser'", pywinauto);
+        Assert.Contains("iface_invoke.Invoke()", pywinauto);
+        Assert.Contains("[@AutomationId='signInUser']", appium);
 
         Assert.Contains("AutomationId='TestabilityFixtureForm'", py);
         Assert.Contains("@pytest.mark.parametrize", py);

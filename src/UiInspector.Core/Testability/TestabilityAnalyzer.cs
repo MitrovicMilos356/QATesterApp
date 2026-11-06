@@ -20,6 +20,7 @@ public sealed partial class TestabilityAnalyzer(UiaWorker worker, ElementInspect
     private const int MaxElements = 5000;
     private const int MaxFindings = 400;
     private const int MaxScriptedControls = 6;
+    private const int MaxWebControls = 20; // the links a link suite clicks
 
     // Long lists (rows, messages) repeat the same control: grading the first few says it all.
     private const int RepeatThreshold = 6;
@@ -148,17 +149,24 @@ public sealed partial class TestabilityAnalyzer(UiaWorker worker, ElementInspect
         TestIdeas.FeatureControl Ensure(TestIdeas.FeatureControl c) =>
             c.Result is null && c.Path.Skip(1).All(snapshot.Contains) ? c with { Result = generator.Generate(automation, c.Path, snapshot) } : c;
 
+        // Each control keeps its web locators, so a script for any one case can be written later, when it's selected.
+        TestIdeas.FeatureControl Prepare(TestIdeas.FeatureControl c, bool ensure)
+        {
+            if (ensure) c = Ensure(c);
+            return web is not null && c.Web is null ? c with { Web = web(c) } : c;
+        }
+
         var features = TestIdeas.FeatureDetector.Detect(root, ancestors, report)
             .Select(f => f with
             {
-                Fields = f.Fields.Select(x => x with { Control = Ensure(x.Control) }).ToList(),
-                Action = f.Action is null ? null : Ensure(f.Action),
-                Controls = f.Controls.Select((c, i) => i < MaxScriptedControls ? Ensure(c) : c).ToList(),
+                Fields = f.Fields.Select(x => x with { Control = Prepare(x.Control, ensure: true) }).ToList(),
+                Action = f.Action is null ? null : Prepare(f.Action, ensure: true),
+                Controls = f.Controls.Select((c, i) => i < MaxWebControls ? Prepare(c, ensure: i < MaxScriptedControls) : c).ToList(),
             })
             .Select(f => f with
             {
                 Cases = TestIdeas.TestCaseCatalog.For(f, isWeb),
-                Scripts = TestIdeas.TestPlanScripts.Build(f, web),
+                Scripts = TestIdeas.TestPlanScripts.Build(f, c => c.Web),
                 Warnings = f.Fields.Select(x => x.Control).Concat(f.Controls).Append(f.Action).OfType<TestIdeas.FeatureControl>()
                     .Where(c => c.Grade == TestabilityGrade.Fragile)
                     .Select(c => $"{TestIdeas.FeatureDetector.Label(c.Element)}: only found by its position; scripts may click the wrong one when the page changes (see the testability report).")
@@ -166,7 +174,7 @@ public sealed partial class TestabilityAnalyzer(UiaWorker worker, ElementInspect
                     .ToList(),
             })
             // The suites run the cases, so they're built once the cases are there.
-            .Select(f => f with { Suites = TestIdeas.TestSuites.Build(f, isWeb, web) })
+            .Select(f => f with { Suites = TestIdeas.TestSuites.Build(f, isWeb) })
             .ToList();
         return new TestIdeas.TestPlan { Window = report.Window, Features = features, IsWeb = isWeb };
     }

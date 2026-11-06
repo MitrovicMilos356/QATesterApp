@@ -13,9 +13,19 @@ namespace UiInspector.Core.TestIdeas;
 /// app gave the right answer ("refused with a message") is the app's own business: each case
 /// carries its expected result, and check_expected() is where the tester makes that a check.
 /// </summary>
-internal static class TestSuites
+public static partial class TestSuites
 {
     private const int MaxLinks = 20;
+
+    /// <summary>
+    /// What a script covers: every case (a suite), or one case (<see cref="Only"/>). The two checks
+    /// that aren't data-table cases (the password field hides its text; an unknown user and a wrong
+    /// password get the same message) come with the suite, or with the case they belong to.
+    /// </summary>
+    private sealed record Scope(TestCase? Only, bool HiddenCheck, bool SameMessage)
+    {
+        public static readonly Scope All = new(null, true, true);
+    }
 
     /// <summary>Text that pages only show when something broke inside: database errors, stack traces, server error pages.</summary>
     internal const string ErrorPattern =
@@ -27,19 +37,38 @@ internal static class TestSuites
 
     private sealed record Case(string Id, string Title, string? Key, string? Value, string Expected);
 
-    public static IReadOnlyList<CodeSnippet> Build(TestFeature feature, bool isWeb, Func<FeatureControl, WebResult?>? web)
+    /// <summary>Suites that run every automatable case of the feature.</summary>
+    internal static IReadOnlyList<CodeSnippet> Build(TestFeature feature, bool isWeb) => feature.Kind switch
     {
-        return feature.Kind switch
+        FeatureKind.Login or FeatureKind.Registration or FeatureKind.Form or FeatureKind.Search => FormSuites(feature, isWeb, Scope.All),
+        FeatureKind.Navigation or FeatureKind.List when isWeb => LinkSuites(feature),
+        _ => [],
+    };
+
+    /// <summary>
+    /// The script for one test case, in each suite language: open, fill, type that case's value,
+    /// send, check. Empty when the case is checked by hand (keyboard order, screen reader, zoom)
+    /// or needs the app's own values.
+    /// </summary>
+    public static IReadOnlyList<CodeSnippet> ForCase(TestFeature feature, TestCase testCase, bool isWeb)
+    {
+        switch (feature.Kind)
         {
-            FeatureKind.Login or FeatureKind.Registration or FeatureKind.Form or FeatureKind.Search => FormSuites(feature, isWeb, web),
-            FeatureKind.Navigation or FeatureKind.List when isWeb && web is not null => LinkSuites(feature, web),
-            _ => [],
-        };
+            case FeatureKind.Login or FeatureKind.Registration or FeatureKind.Form or FeatureKind.Search:
+                var hidden = isWeb && testCase.Title.EndsWith("is hidden while typing", StringComparison.Ordinal);
+                var sameMessage = isWeb && feature.Kind == FeatureKind.Login && testCase.Title == "User that doesn't exist";
+                return FormSuites(feature, isWeb, new Scope(testCase, hidden, sameMessage));
+            case FeatureKind.Navigation or FeatureKind.List:
+                // Their one automatable case is "each link (item) opens", which is the whole link suite.
+                return testCase.Automatable ? feature.Suites : [];
+            default:
+                return [];
+        }
     }
 
     // ---------------------------------------------------------------- forms
 
-    private static IReadOnlyList<CodeSnippet> FormSuites(TestFeature f, bool isWeb, Func<FeatureControl, WebResult?>? web)
+    private static IReadOnlyList<CodeSnippet> FormSuites(TestFeature f, bool isWeb, Scope scope)
     {
         var fields = new List<Field>();
         var used = new HashSet<string>();
@@ -53,7 +82,7 @@ internal static class TestSuites
                 _ when f.Kind == FeatureKind.Login => ("tester@example.com", "UIINSPECTOR_USER"),
                 _ => (TestPlanScripts.SampleValue(field.Kind), null),
             };
-            fields.Add(new Field(key, field, sample, env, isWeb ? web?.Invoke(field.Control) : null));
+            fields.Add(new Field(key, field, sample, env, isWeb ? field.Control.Web : null));
         }
         if (fields.Count == 0 || fields.All(x => x.Feature.Kind == FieldKind.CheckBox)) return [];
 
@@ -77,21 +106,39 @@ internal static class TestSuites
             else if (c.Automatable) cases.Add(new Case(c.Id, c.Title, target.Key, c.Value ?? "", c.Expected));
         }
 
+        // One case: only it (and its own check), nothing to list as manual.
+        if (scope.Only is { } only)
+        {
+            cases = cases.Where(c => c.Id == only.Id).ToList();
+            manual = [];
+            if (cases.Count == 0 && !scope.HiddenCheck && !scope.SameMessage) return [];
+        }
+
+        var kind = scope.Only is null ? "Test suite" : $"{scope.Only.Id}";
         var snippets = new List<CodeSnippet>();
         if (isWeb)
         {
             if (fields.All(x => x.Web is { Connected: true, Best: not null }) && fields[0].Web is { Launch.Kind: WebAppKind.Browser } page)
             {
-                var action = f.Action is { } a ? web?.Invoke(a) : null;
+                var action = f.Action?.Web;
                 if (action is not null && action is not { Connected: true, Best: not null }) action = null;
-                snippets.Add(new CodeSnippet("suite-playwright-py", "Test suite · Playwright (Python, pytest)", PlaywrightPy(f, fields, action, cases, manual, page)));
-                snippets.Add(new CodeSnippet("suite-playwright-js", "Test suite · Playwright Test (JavaScript)", PlaywrightJs(f, fields, action, cases, manual, page)));
+                snippets.Add(new CodeSnippet("suite-playwright-py", $"{kind} · Playwright (Python, pytest)", PlaywrightPy(f, fields, action, cases, manual, page, scope)));
+                snippets.Add(new CodeSnippet("suite-playwright-js", $"{kind} · Playwright Test (JavaScript)", PlaywrightJs(f, fields, action, cases, manual, page, scope)));
+                snippets.Add(new CodeSnippet("suite-playwright-cs", $"{kind} · Playwright (C#, NUnit)", PlaywrightCs(f, fields, action, cases, manual, page, scope)));
+                // Selenium needs its own locators (an XPath or CSS selector) for every control it touches.
+                if (fields.All(x => x.Web!.Selenium is not null) && (action is null || action.Selenium is not null))
+                {
+                    snippets.Add(new CodeSnippet("suite-selenium-py", $"{kind} · Selenium (Python, pytest)", SeleniumPy(f, fields, action, cases, manual, page, scope)));
+                    snippets.Add(new CodeSnippet("suite-selenium-java", $"{kind} · Selenium (Java, JUnit 5)", SeleniumJava(f, fields, action, cases, manual, page, scope)));
+                }
             }
         }
-        else if (fields[0].Feature.Control.Selector is { } first)
+        else if (fields[0].Feature.Control.Selector is { } first && cases.Count > 0)
         {
-            snippets.Add(new CodeSnippet("suite-uiautomation", "Test suite · Python uiautomation (pytest)", UiaPy(f, fields, cases, manual, first.Window)));
-            snippets.Add(new CodeSnippet("suite-flaui", "Test suite · FlaUI (C#, xUnit)", FlaUiXunit(f, fields, cases, manual, first.Window)));
+            snippets.Add(new CodeSnippet("suite-uiautomation", $"{kind} · Python uiautomation (pytest)", UiaPy(f, fields, cases, manual, first.Window, scope)));
+            snippets.Add(new CodeSnippet("suite-flaui", $"{kind} · FlaUI (C#, xUnit)", FlaUiXunit(f, fields, cases, manual, first.Window, scope)));
+            snippets.Add(new CodeSnippet("suite-pywinauto", $"{kind} · pywinauto (Python, pytest)", PywinautoPy(f, fields, cases, manual, first.Window, scope)));
+            snippets.Add(new CodeSnippet("suite-appium", $"{kind} · Appium (Python, pytest)", AppiumPy(f, fields, cases, manual, first.Window, scope)));
         }
         return snippets;
     }
@@ -108,10 +155,12 @@ internal static class TestSuites
         return unique;
     }
 
-    private static string Header(TestFeature f, string comment, int cases, IReadOnlyList<TestCase> manual, IEnumerable<string> howToRun)
+    private static string Header(TestFeature f, string comment, int cases, IReadOnlyList<TestCase> manual, IEnumerable<string> howToRun, Scope? scope = null)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"{comment} Test suite for “{f.Title}”: {cases} cases from UiInspector's test plan, each run with its own data.");
+        sb.AppendLine(scope?.Only is { } only
+            ? $"{comment} Test {only.Id} “{only.Title}” ({f.Title}), from UiInspector's test plan."
+            : $"{comment} Test suite for “{f.Title}”: {cases} cases from UiInspector's test plan, each run with its own data.");
         foreach (var line in howToRun.Where(l => l.Length > 0)) sb.AppendLine($"{comment} {line}");
         sb.AppendLine($"{comment}");
         sb.AppendLine($"{comment} After each case it checks automatically what can be checked without knowing the app:");
@@ -154,7 +203,7 @@ internal static class TestSuites
         _ => python ? "p.chromium.launch(channel=\"chrome\", headless=HEADLESS)" : "chrome",
     };
 
-    private static string PlaywrightPy(TestFeature f, List<Field> fields, WebResult? action, List<Case> cases, List<TestCase> manual, WebResult page)
+    private static string PlaywrightPy(TestFeature f, List<Field> fields, WebResult? action, List<Case> cases, List<TestCase> manual, WebResult page, Scope scope)
     {
         var sb = new StringBuilder();
         sb.Append(Header(f, "#", cases.Count, manual,
@@ -162,7 +211,7 @@ internal static class TestSuites
             page.Browser == BrowserFlavor.Firefox ? "pip install pytest playwright, then once: playwright install firefox" : "pip install pytest playwright   (uses the installed browser)",
             "Run:  pytest " + Slug(f.Title) + "_test.py -v      (set HEADLESS=1 to run without a window)",
             fields.Any(x => x.Env is not null) ? $"Set {string.Join(" and ", fields.Where(x => x.Env is not null).Select(x => x.Env).Distinct())} to a test account (defaults: {string.Join(", ", fields.Where(x => x.Env is not null).Select(x => x.Sample))})." : "",
-        ]));
+        ], scope));
         sb.AppendLine("import os");
         sb.AppendLine("import re");
         sb.AppendLine("from pathlib import Path");
@@ -224,45 +273,48 @@ internal static class TestSuites
         sb.AppendLine("        browser.close()");
         sb.AppendLine();
         sb.AppendLine();
-        sb.AppendLine("@pytest.mark.parametrize(\"case_id, title, field, value, expected\", CASES, ids=[c[0] for c in CASES])");
-        sb.AppendLine("def test_case(browser, case_id, title, field, value, expected):");
-        sb.AppendLine("    page = browser.new_page()");
-        sb.AppendLine("    alerts, server_errors = [], []");
-        sb.AppendLine("    page.on(\"dialog\", lambda d: (alerts.append(d.message), d.dismiss()))");
-        sb.AppendLine("    page.on(\"response\", lambda r: server_errors.append(f\"{r.status} {r.url}\") if r.status >= 500 else None)");
-        sb.AppendLine("    try:");
-        sb.AppendLine("        page.goto(URL)");
-        sb.AppendLine("        values = dict(VALID)");
-        sb.AppendLine("        if field == \"*\":  # every field empty");
-        sb.AppendLine("            values = {k: False if isinstance(v, bool) else \"\" for k, v in VALID.items()}");
-        sb.AppendLine("        elif field is not None:");
-        sb.AppendLine("            values[field] = value");
-        sb.AppendLine("        fill(page, values)");
-        sb.AppendLine("        send(page)");
-        sb.AppendLine("        try:");
-        sb.AppendLine("            page.wait_for_load_state(\"networkidle\", timeout=5000)");
-        sb.AppendLine("        except Exception:");
-        sb.AppendLine("            pass  # pages that keep a connection open never go idle");
-        sb.AppendLine("        RESULTS.mkdir(exist_ok=True)");
-        sb.AppendLine("        page.screenshot(path=RESULTS / f\"{case_id}.png\", full_page=True)");
-        sb.AppendLine();
-        sb.AppendLine("        problems = []");
-        sb.AppendLine("        if alerts:");
-        sb.AppendLine("            problems.append(f\"an alert appeared ({alerts[0]!r}): the page ran code typed into a field (XSS)\")");
-        sb.AppendLine("        if value and \"<script\" in value and value in page.content():");
-        sb.AppendLine("            problems.append(\"the input is in the page as HTML, not as text (XSS, even if no alert showed)\")");
-        sb.AppendLine("        error = ERROR_TEXT.search(page.inner_text(\"body\"))");
-        sb.AppendLine("        if error:");
-        sb.AppendLine("            problems.append(f\"error text on the page: {error.group(0)!r} (database or crash details)\")");
-        sb.AppendLine("        if server_errors:");
-        sb.AppendLine("            problems.append(f\"the server failed: {server_errors[0]}\")");
-        sb.AppendLine("        if PASSWORD_FIELD and values[PASSWORD_FIELD] and values[PASSWORD_FIELD] in page.url:");
-        sb.AppendLine("            problems.append(\"the password is in the address\")");
-        sb.AppendLine("        assert not problems, f\"{case_id} {title}: \" + \"; \".join(problems) + f\"\\nExpected: {expected}\"");
-        sb.AppendLine("        check_expected(page, case_id, expected)");
-        sb.AppendLine("    finally:");
-        sb.AppendLine("        page.close()");
-        if (password is not null)
+        if (cases.Count > 0) // only an extra check was selected: no data cases
+        {
+            sb.AppendLine("@pytest.mark.parametrize(\"case_id, title, field, value, expected\", CASES, ids=[c[0] for c in CASES])");
+            sb.AppendLine("def test_case(browser, case_id, title, field, value, expected):");
+            sb.AppendLine("    page = browser.new_page()");
+            sb.AppendLine("    alerts, server_errors = [], []");
+            sb.AppendLine("    page.on(\"dialog\", lambda d: (alerts.append(d.message), d.dismiss()))");
+            sb.AppendLine("    page.on(\"response\", lambda r: server_errors.append(f\"{r.status} {r.url}\") if r.status >= 500 else None)");
+            sb.AppendLine("    try:");
+            sb.AppendLine("        page.goto(URL)");
+            sb.AppendLine("        values = dict(VALID)");
+            sb.AppendLine("        if field == \"*\":  # every field empty");
+            sb.AppendLine("            values = {k: False if isinstance(v, bool) else \"\" for k, v in VALID.items()}");
+            sb.AppendLine("        elif field is not None:");
+            sb.AppendLine("            values[field] = value");
+            sb.AppendLine("        fill(page, values)");
+            sb.AppendLine("        send(page)");
+            sb.AppendLine("        try:");
+            sb.AppendLine("            page.wait_for_load_state(\"networkidle\", timeout=5000)");
+            sb.AppendLine("        except Exception:");
+            sb.AppendLine("            pass  # pages that keep a connection open never go idle");
+            sb.AppendLine("        RESULTS.mkdir(exist_ok=True)");
+            sb.AppendLine("        page.screenshot(path=RESULTS / f\"{case_id}.png\", full_page=True)");
+            sb.AppendLine();
+            sb.AppendLine("        problems = []");
+            sb.AppendLine("        if alerts:");
+            sb.AppendLine("            problems.append(f\"an alert appeared ({alerts[0]!r}): the page ran code typed into a field (XSS)\")");
+            sb.AppendLine("        if value and \"<script\" in value and value in page.content():");
+            sb.AppendLine("            problems.append(\"the input is in the page as HTML, not as text (XSS, even if no alert showed)\")");
+            sb.AppendLine("        error = ERROR_TEXT.search(page.inner_text(\"body\"))");
+            sb.AppendLine("        if error:");
+            sb.AppendLine("            problems.append(f\"error text on the page: {error.group(0)!r} (database or crash details)\")");
+            sb.AppendLine("        if server_errors:");
+            sb.AppendLine("            problems.append(f\"the server failed: {server_errors[0]}\")");
+            sb.AppendLine("        if PASSWORD_FIELD and values[PASSWORD_FIELD] and values[PASSWORD_FIELD] in page.url:");
+            sb.AppendLine("            problems.append(\"the password is in the address\")");
+            sb.AppendLine("        assert not problems, f\"{case_id} {title}: \" + \"; \".join(problems) + f\"\\nExpected: {expected}\"");
+            sb.AppendLine("        check_expected(page, case_id, expected)");
+            sb.AppendLine("    finally:");
+            sb.AppendLine("        page.close()");
+        }
+        if (password is not null && scope.HiddenCheck)
         {
             sb.AppendLine();
             sb.AppendLine();
@@ -272,7 +324,7 @@ internal static class TestSuites
             sb.AppendLine($"    assert {WebCodeTemplates.PlaywrightLocator(password.Web!.Best!, python: true)}.get_attribute(\"type\") == \"password\", \"the password field shows what's typed\"");
             sb.AppendLine("    page.close()");
         }
-        if (f.Kind == FeatureKind.Login && password is not null && fields.FirstOrDefault(x => x.Env == "UIINSPECTOR_USER") is { } user)
+        if (scope.SameMessage && f.Kind == FeatureKind.Login && password is not null && fields.FirstOrDefault(x => x.Env == "UIINSPECTOR_USER") is { } user)
         {
             sb.AppendLine();
             sb.AppendLine();
@@ -300,7 +352,7 @@ internal static class TestSuites
 
     // ---------------------------------------------------------------- Playwright Test (JavaScript)
 
-    private static string PlaywrightJs(TestFeature f, List<Field> fields, WebResult? action, List<Case> cases, List<TestCase> manual, WebResult page)
+    private static string PlaywrightJs(TestFeature f, List<Field> fields, WebResult? action, List<Case> cases, List<TestCase> manual, WebResult page, Scope scope)
     {
         var sb = new StringBuilder();
         var file = Slug(f.Title) + ".spec.js";
@@ -309,7 +361,7 @@ internal static class TestSuites
             page.Browser == BrowserFlavor.Firefox ? "npm i -D @playwright/test, then once: npx playwright install firefox" : "npm i -D @playwright/test   (uses the installed browser)",
             $"Save as tests/{file}, run:  npx playwright test {file}      (set HEADLESS=1 to run without a window)",
             fields.Any(x => x.Env is not null) ? $"Set {string.Join(" and ", fields.Where(x => x.Env is not null).Select(x => x.Env).Distinct())} to a test account." : "",
-        ]));
+        ], scope));
         sb.AppendLine("const { test, expect } = require('@playwright/test');");
         sb.AppendLine();
         sb.AppendLine(page.Browser == BrowserFlavor.Firefox
@@ -380,7 +432,7 @@ internal static class TestSuites
         sb.AppendLine("    await checkExpected(page, id, expected);");
         sb.AppendLine("  });");
         sb.AppendLine("}");
-        if (password is not null)
+        if (password is not null && scope.HiddenCheck)
         {
             sb.AppendLine();
             sb.AppendLine("test('the password field hides what is typed', async ({ page }) => {");
@@ -393,7 +445,7 @@ internal static class TestSuites
 
     // ---------------------------------------------------------------- desktop: Python uiautomation (pytest)
 
-    private static string UiaPy(TestFeature f, List<Field> fields, List<Case> cases, List<TestCase> manual, SelectorStep window)
+    private static string UiaPy(TestFeature f, List<Field> fields, List<Case> cases, List<TestCase> manual, SelectorStep window, Scope scope)
     {
         var sb = new StringBuilder();
         sb.Append(Header(f, "#", cases.Count, manual,
@@ -401,7 +453,7 @@ internal static class TestSuites
             "pip install pytest uiautomation",
             "Run with the app open on this form:  pytest " + Slug(f.Title) + "_test.py -v",
             "Each case starts from the window as it is: if a case leaves the form (a successful login), put the way back in reset().",
-        ]));
+        ], scope));
         sb.AppendLine("import re");
         sb.AppendLine("import time");
         sb.AppendLine("from pathlib import Path");
@@ -519,7 +571,7 @@ internal static class TestSuites
 
     // ---------------------------------------------------------------- desktop: FlaUI (C#, xUnit)
 
-    private static string FlaUiXunit(TestFeature f, List<Field> fields, List<Case> cases, List<TestCase> manual, SelectorStep window)
+    private static string FlaUiXunit(TestFeature f, List<Field> fields, List<Case> cases, List<TestCase> manual, SelectorStep window, Scope scope)
     {
         var sb = new StringBuilder();
         var className = Pascal(f.Title) + "Suite";
@@ -528,7 +580,7 @@ internal static class TestSuites
             "NuGet: FlaUI.UIA3, xunit, xunit.runner.visualstudio, Microsoft.NET.Test.Sdk (a test project)",
             "Run with the app open on this form:  dotnet test --logger \"console;verbosity=normal\"",
             "Each case starts from the window as it is: if a case leaves the form (a successful login), put the way back in Reset().",
-        ]));
+        ], scope));
         sb.AppendLine("using System.Text.RegularExpressions;");
         sb.AppendLine("using FlaUI.Core.AutomationElements;");
         sb.AppendLine("using FlaUI.Core.Definitions;");
@@ -672,11 +724,11 @@ internal static class TestSuites
 
     // ---------------------------------------------------------------- links (web)
 
-    private static IReadOnlyList<CodeSnippet> LinkSuites(TestFeature f, Func<FeatureControl, WebResult?> web)
+    private static IReadOnlyList<CodeSnippet> LinkSuites(TestFeature f)
     {
         var links = f.Controls
             .Take(MaxLinks)
-            .Select(c => (Control: c, Web: web(c)))
+            .Select(c => (Control: c, c.Web))
             .Where(x => x.Web is { Connected: true, Best: not null })
             .ToList();
         if (links.Count == 0 || links[0].Web is not { Launch.Kind: WebAppKind.Browser } page) return [];

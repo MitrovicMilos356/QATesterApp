@@ -135,19 +135,56 @@ public class NoDebugPortWebTests(EdgeNoPortFixture fixture) : IClassFixture<Edge
         Directory.CreateDirectory(dir);
         foreach (var (feature, name) in new[] { (login, "login"), (comment, "comment") })
         {
-            var py = feature.Suites.Single(s => s.Id == "suite-playwright-py").Code;
-            var js = feature.Suites.Single(s => s.Id == "suite-playwright-js").Code;
-            File.WriteAllText(Path.Combine(dir, $"{name}_test.py"), py);
-            File.WriteAllText(Path.Combine(dir, $"{name}.spec.js"), js);
-            Assert.Contains("@pytest.mark.parametrize", py);
-            Assert.Contains("page.on(\"dialog\"", py);
-            Assert.Contains("for (const [id, title, field, value, expected] of CASES)", js);
+            // Every web suite language, each saved under the name its runner expects.
+            Assert.Equal(["suite-playwright-py", "suite-playwright-js", "suite-playwright-cs", "suite-selenium-py", "suite-selenium-java"], feature.Suites.Select(s => s.Id));
+            string Code(string id) => feature.Suites.Single(s => s.Id == id).Code;
+            File.WriteAllText(Path.Combine(dir, $"{name}_test.py"), Code("suite-playwright-py"));
+            File.WriteAllText(Path.Combine(dir, $"{name}.spec.js"), Code("suite-playwright-js"));
+            File.WriteAllText(Path.Combine(dir, $"{name}_selenium_test.py"), Code("suite-selenium-py"));
+            var pascal = char.ToUpperInvariant(name[0]) + name[1..];
+            File.WriteAllText(Path.Combine(dir, $"{pascal}Suite.cs"), Code("suite-playwright-cs"));
+            File.WriteAllText(Path.Combine(dir, $"{pascal}SeleniumTest.java"), Code("suite-selenium-java"));
+            Assert.Contains("@pytest.mark.parametrize", Code("suite-playwright-py"));
+            Assert.Contains("page.on(\"dialog\"", Code("suite-playwright-py"));
+            Assert.Contains("for (const [id, title, field, value, expected] of CASES)", Code("suite-playwright-js"));
+            Assert.Contains("[TestCaseSource(nameof(Cases))]", Code("suite-playwright-cs"));
+            Assert.Contains("def take_alert(driver):", Code("suite-selenium-py"));
+            Assert.Contains("@ParameterizedTest(name = \"{0} {1}\")", Code("suite-selenium-java"));
         }
         var loginPy = login.Suites.Single(s => s.Id == "suite-playwright-py").Code;
         Assert.Contains("page.locator(\"#login-user\").fill(values[\"login_email\"])", loginPy);
         Assert.Contains("\"a\" * 1000", loginPy);                       // long values as code, not as 1,000 letters
         Assert.Contains("def test_password_is_hidden(browser):", loginPy);
         Assert.Contains("def test_unknown_user_and_wrong_password_get_the_same_message(browser):", loginPy);
+    }
+
+    // A selected test case gets a script of its own: just that case, with its value and the automatic checks.
+    [Fact]
+    public async Task TestPlan_ScriptForOneCase()
+    {
+        var checkout = Find(w => ByName(w, ControlType.Button, "Checkout"));
+        var report = await new Testability.TestabilityAnalyzer(_worker, _inspector).AnalyzeAsync(_inspector.InspectElement(_automation, checkout)!.Element);
+        var plan = report.Plan!;
+        var comment = plan.Features.Single(f => f.Fields.Any(x => x.Label == "Comment"));
+        var login = plan.Features.Single(f => f.Kind == TestIdeas.FeatureKind.Login);
+
+        var sql = comment.Cases.Single(c => c.Title == "Comment: SQL injection");
+        var py = TestIdeas.TestSuites.ForCase(comment, sql, plan.IsWeb).Single(s => s.Id == "suite-playwright-py");
+        Assert.StartsWith($"{sql.Id} · ", py.Title);
+        Assert.Contains($"# Test {sql.Id} “Comment: SQL injection”", py.Code);
+        Assert.Single(py.Code.Split('\n'), l => l.TrimStart().StartsWith("(\"" + "FORM-", StringComparison.Ordinal));
+        Assert.Contains("\"' OR '1'='1' --\"", py.Code);
+        var dir = Path.Combine(AppContext.BaseDirectory, "generated", "suites");
+        Directory.CreateDirectory(dir);
+        File.WriteAllText(Path.Combine(dir, "one_case_test.py"), py.Code);
+
+        // Checked by hand: no script.
+        Assert.Empty(TestIdeas.TestSuites.ForCase(comment, comment.Cases.Single(c => c.Title == "Keyboard order"), plan.IsWeb));
+        // The password check is a test of its own, with no data cases.
+        var hidden = TestIdeas.TestSuites.ForCase(login, login.Cases.Single(c => c.Title == "Password: is hidden while typing"), plan.IsWeb)
+            .Single(s => s.Id == "suite-playwright-py").Code;
+        Assert.Contains("def test_password_is_hidden(browser):", hidden);
+        Assert.DoesNotContain("def test_case(", hidden);
     }
 
     // Regression (Discord's friend search): React's useId ids change every run, so the field is found

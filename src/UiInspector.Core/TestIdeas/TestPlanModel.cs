@@ -114,6 +114,9 @@ public sealed record FeatureControl(IReadOnlyList<ElementInfo> Path, SelectorRes
     public ElementInfo Element => Path[^1];
 
     public Selector? Selector => Result?.Best;
+
+    /// <summary>Its Playwright and Selenium locators, for controls in a web page (built when the page was read).</summary>
+    public Web.WebResult? Web { get; init; }
 }
 
 public sealed record FeatureField(FeatureControl Control, FieldKind Kind, string Label);

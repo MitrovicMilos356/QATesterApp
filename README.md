@@ -295,9 +295,19 @@ page's navigation and lists), the script list starts with data-driven test suite
 | Suite | For | Runs with |
 | :--- | :--- | :--- |
 | Playwright (Python, pytest) | Web pages in Edge, Chrome, Firefox | `pytest login_test.py -v` |
-| Playwright Test (JavaScript) | Web pages in Edge, Chrome, Firefox | `npx playwright test login.spec.js` |
+| Playwright Test (JavaScript) | Web pages | `npx playwright test login.spec.js` |
+| Playwright (C#, NUnit) | Web pages | `dotnet test` in a test project |
+| Selenium (Python, pytest) | Web pages | `pytest login_selenium_test.py -v` |
+| Selenium (Java, JUnit 5) | Web pages | `mvn test` (Java 11+) |
 | Python uiautomation (pytest) | Desktop apps | `pytest login_test.py -v`, with the app open on the form |
 | FlaUI (C#, xUnit) | Desktop apps | `dotnet test` in a test project |
+| pywinauto (Python, pytest) | Desktop apps | `pytest login_test.py -v` (Pillow for screenshots) |
+| Appium (Python, pytest) | Desktop apps | `pytest login_test.py -v`, with an Appium server and a Windows driver |
+
+Selenium can't see the server's answers, so its suites catch server errors only through error
+text on the page; it can't type emoji into Chrome or Edge either, so those values are set through
+JavaScript with an input event, as a paste would. Saving a Java or C# suite names the file after
+its class, as Java requires.
 
 Each suite holds the feature's cases as a table (id, title, field, exact value, expected) and runs
 them one by one: a fresh page (web), valid data in every field, the case's value in its field,
@@ -322,6 +332,14 @@ the same message. Navigation and list suites click each link from a fresh page a
 pages, 4xx/5xx answers and "not found" text. Cases that need your app's own values (the minimum
 password length) are listed at the top of the suite to do by hand. `HEADLESS=1` runs the web
 suites without a window. Long values are written as code (`"a" * 1000`).
+
+**A script for each case.** The script box follows the table: with a test case selected, it shows
+that case's own script in each suite language (open, fill, type that case's value, send, the
+automatic checks, a screenshot), named after the case when saved (`login_04_test.py`). Cases a
+script can't judge (keyboard order, screen reader, zoom) or that need your app's own value (the
+minimum password length) show their steps and expected result instead. "Password is hidden while
+typing" and "User that doesn't exist" bring their own checks. **Whole feature** goes back to the
+suite with every case.
 
 Only run the security cases against apps you're allowed to test.
 
@@ -476,6 +494,7 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | Rows found by their text (FlaUI, uiautomation, pywinauto) | The Delete button of "Order 1042", in a list of rows with no IDs and identical buttons, run against the fixture (3/3), then against a later version of it with a new row on top and the rows reordered: 3/3 still deleted Order 1042. The old position-based selector deleted Order 1043 there, without any error |
 | Web rows found by their text (Playwright JS/Python/C#, Selenium Python) | The Delete button of "Order 1042" in React-style rows (no ids, hashed classes), run against the page and against a later version of it (new row on top, rows reordered): 8/8 deleted Order 1042. A position-based locator deleted Order 1043 on the later version, without any error. The earlier 24 web cases still pass |
 | Web code without a debug port | Locators built from the accessibility tree for the 8 web fixture cases (including an unnamed clickable tile), with each script opening its own (headless) Edge: Playwright JS/Python/C# 24/24, Selenium Python 7/8. The miss is the Shadow DOM button: Selenium's XPath can't look inside Shadow DOM, and without a port the inspector can't tell it's there (Playwright handles it). A recorded web workflow (fill, delete order 1042, check): 4/4. Scripts that start the app with a port themselves, with a stand-in Electron launcher: 4/4; with "the app" already running without a port, the script stops after 4 s with the "quit it completely" message. The 24 debug-port cases still pass |
+| Test suites in the other languages | Run for real on the same fixtures: Playwright C# (NUnit 4.3, Playwright 1.55) and Selenium Python (4.52, Edge driver) gave the same verdict as the Playwright suites (26 passed, the two planted XSS cases failed), the emoji cases included; pywinauto 15/15 on the WinForms sign-in panel (the first run caught `exists()` called on the found window, which only the window's specification has; fixed). Playwright C# compiled without warnings after removing a constant that could be null. **Not run here**: Selenium Java (Java 8 on this machine; Selenium 4 needs 11+; read through instead) and Appium (no Appium server; compiles with `py_compile`) |
 | Test suites | Generated from the test fixtures and **run for real**. Web (the fixture page in headless Edge): the Playwright Python suite with pytest 9.2 and the Playwright Test suite (JavaScript, 1.56): login 14/14 plus the hidden-password check (the same-message check skipped without a real account), and a deliberately unsafe comment form (inserted with `innerHTML`) failed exactly on its two XSS cases: the `<img onerror>` alert, and the `<script>` in the page as HTML; 25 passed, 2 failed, as intended. Desktop (the WinForms fixture's sign-in panel): the uiautomation suite 15/15 with pytest, the FlaUI suite compiled with FlaUI 5.0 and xUnit 2.9 and passed 15/15, 15 screenshots each, through UI Automation only (no real mouse or keyboard). Compiling the FlaUI suite caught an ambiguous `Capture` (FlaUI's against .NET's regex class), fixed |
 | Test plan in Firefox | The open Firefox window, read in memory (only structure printed): every feature with a script got all 9 languages; Playwright opens `p.firefox.launch(headless=False)` at the page's https address read from Firefox. Templates for Firefox checked per language by unit tests. **Not run**: the Firefox scripts themselves (Playwright's Firefox build isn't installed here) |
 | Test plan | The web fixture in Edge: the sign-in form found as a login with ~60 cases, its Playwright script fills `#login-user`, reads the password from `UIINSPECTOR_SECRET_1` and clicks *Sign in*; the search box found as a search. Feature detection (login, sign-up, search, filters, paging, navigation) and field classification (English and Serbian labels) unit-tested on made-up pages; CSV checked for Excel safety. A real job site (helloworld.rs, throwaway Edge, nothing clicked): search, filters, two lists (job titles, companies), paging, navigation and the page, 80 cases in 1.5 s. In the GUI, driven through UI Automation: features listed, cases shown and filtered, script shown. **Not run here**: the generated scripts against a real site, and desktop apps other than the fixture |

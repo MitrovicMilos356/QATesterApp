@@ -677,8 +677,13 @@
                                         AutomationProperties.AutomationId="SavePlanScriptButton" AutomationProperties.Name="Save script"/>
                                 <Button DockPanel.Dock="Right" Padding="10,3" Margin="0,0,6,0" Content="Copy script" Command="{Binding CopyPlanScriptCommand}"
                                         AutomationProperties.AutomationId="CopyPlanScriptButton"/>
-                                <TextBlock Text="Scripts" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,8,0"
-                                           ToolTip="Test suites run every case with its data and check for XSS, crash text and errors; main-flow scripts are a starting point"/>
+                                <Button DockPanel.Dock="Right" Padding="10,3" Margin="0,0,6,0" Content="Whole feature" Command="{Binding ShowWholeFeatureCommand}"
+                                        Visibility="{Binding IsCaseScript, Converter={StaticResource BoolToVisibility}}"
+                                        AutomationProperties.AutomationId="WholeFeatureButton"
+                                        ToolTip="Back to the scripts for every case of this feature"/>
+                                <TextBlock Text="{Binding ScriptsHeader}" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,8,0"
+                                           AutomationProperties.AutomationId="ScriptsHeader"
+                                           ToolTip="Select a test case for its own script; test suites run every case with its data and check for XSS, crash text and errors"/>
                                 <ComboBox ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}" DisplayMemberPath="Title" Margin="0,0,8,0"
                                           AutomationProperties.AutomationId="PlanScriptLanguage" AutomationProperties.Name="Script language"/>
                             </DockPanel>
