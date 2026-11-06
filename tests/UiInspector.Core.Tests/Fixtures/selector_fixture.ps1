@@ -21,7 +21,15 @@ function New-Panel([string]$name, [int]$x, [int]$y, [int]$w, [int]$h) {
     $p
 }
 
-$form = New-Object System.Windows.Forms.Form
+# Opens without taking keyboard focus: a window that activates itself would get whatever the
+# person at the computer is typing, off-screen where nobody sees it.
+Add-Type -ReferencedAssemblies System.Windows.Forms -TypeDefinition @'
+public class QuietForm : System.Windows.Forms.Form
+{
+    protected override bool ShowWithoutActivation { get { return true; } }
+}
+'@
+$form = New-Object QuietForm
 $form.Text = $Title
 $form.Name = $FormName
 $form.StartPosition = 'Manual'
@@ -118,6 +126,20 @@ foreach ($depth in 1..5) {
 foreach ($i in 0..2) { $menuItems.Controls.Add((New-Button '' '' (5 + $i * 100) 5)) }
 $profileMenu.Controls.Add($menuTitle)
 
-$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes, $remember, $password, $passwordInfo, $ordersList, $showPopup, $otherOk, $popup, $profileMenu))
+# A sign-in panel for the test plan's desktop suites: two named fields and a button that reports
+# the result in the status label (below the visible area; it's only driven through UI Automation).
+$signIn = New-Panel 'signInPanel' 10 790 500 70
+$signInUser = New-Object System.Windows.Forms.TextBox
+$signInUser.Name = 'signInUser'; $signInUser.AccessibleName = 'User name'; $signInUser.Location = New-Object System.Drawing.Point(5, 5); $signInUser.Width = 150
+$signInPassword = New-Object System.Windows.Forms.TextBox
+$signInPassword.Name = 'signInPassword'; $signInPassword.AccessibleName = 'Password'; $signInPassword.UseSystemPasswordChar = $true
+$signInPassword.Location = New-Object System.Drawing.Point(165, 5); $signInPassword.Width = 150
+$signInButton = New-Button 'Sign in' 'signInButton' 325 4
+$signInButton.Add_Click({
+    $status.Text = if ($signInUser.Text.Length -eq 0 -or $signInPassword.Text.Length -eq 0) { 'Fill in both fields' } else { 'Wrong user name or password' }
+})
+$signIn.Controls.AddRange(@($signInUser, $signInPassword, $signInButton))
+
+$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes, $remember, $password, $passwordInfo, $ordersList, $showPopup, $otherOk, $popup, $profileMenu, $signIn))
 $form.Controls.AddRange([System.Windows.Forms.Control[]]$lookAlikes)
 [System.Windows.Forms.Application]::Run($form)

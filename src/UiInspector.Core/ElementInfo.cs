@@ -54,6 +54,9 @@ public sealed class ElementRef
     internal FlaUI.Core.AutomationElements.AutomationElement Element { get; }
 }
 
+/// <summary>An element with the elements below it, as read in one go.</summary>
+public sealed record ElementNode(ElementInfo Info, IReadOnlyList<ElementNode> Children);
+
 public sealed record ChildrenResult(IReadOnlyList<ElementInfo> Children, bool Truncated);
 
 public enum InspectionSource

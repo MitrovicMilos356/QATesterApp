@@ -72,9 +72,13 @@ public static partial class AttributeStability
         {
             return AttributeVerdict.Unusable(className, "WinForms class names contain a per-build suffix, so they change between builds.");
         }
-        if (frameworkId == "Chrome" && className.Contains(' '))
+        if (frameworkId is "Chrome" or "Gecko" && className.Contains(' '))
         {
             return AttributeVerdict.Unusable(className, "This is an HTML class list; it describes styling, not identity.");
+        }
+        if (frameworkId is "Chrome" or "Gecko" && UtilityClass().IsMatch(className))
+        {
+            return AttributeVerdict.Unusable(className, $"'{className}' is a styling utility class (Tailwind, Bootstrap); it says nothing about the element and changes with any redesign.");
         }
         if (HashedToken().IsMatch(className))
         {
@@ -184,11 +188,34 @@ public static partial class AttributeStability
     [GeneratedRegex(@"^\d+$")]
     private static partial Regex AllDigits();
 
+    // Utility classes describe one bit of styling: "flex-1", "p-4", "mt-2", "w-full", "text-sm",
+    // "bg-gray-100", "d-flex", "col-md-6", "hidden", "md:flex". A responsive or state prefix ("md:",
+    // "hover:") makes no difference. A known prefix needs a styling value after it, so names like
+    // "text-editor" or "content-wrapper" still count as real class names.
+    [GeneratedRegex("""
+        ^(?:[a-z0-9-]+:)*-?(?:
+          (?:flex|grid|col|row|d|w|h|size|min-w|min-h|max-w|max-h|[mp][trblxyse]?|space-[xy]|gap(?:-[xy])?|text|font|leading|tracking
+            |bg|border(?:-[trblxy])?|rounded(?:-[trbl]{1,2})?|shadow|opacity|z|overflow(?:-[xy])?|items|justify|self|place-(?:items|content|self)
+            |content|align|top|left|right|bottom|inset(?:-[xy])?|basis|grow|shrink|order|col-span|row-span|offset|line-clamp|aspect|object
+            |cursor|select|whitespace|break|duration|ease|delay|ring|outline|translate-[xy]|scale|rotate|fill|stroke|float|clear)
+          (?:-(?:xs|sm|md|lg|xl|xxl))?
+          (?:-(?:\d+(?:\.\d+)?|\d+/\d+|\d?xs|sm|md|lg|\d?xl|xxl|full|screen|auto|px|none|flex|inline|block|grid|table|center|start|end|between
+            |around|evenly|stretch|baseline|wrap|nowrap|reverse|inherit|current|transparent|white|black|bold|semibold|medium|normal|light|thin
+            |extrabold|hidden|visible|scroll|clip|pointer|default|justify|middle|cover|contain|square|video|words|all|ellipsis|uppercase
+            |lowercase|primary|secondary|success|danger|warning|info|light|dark|muted|\[[^\]]+\]
+            |(?:slate|gray|grey|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}))+
+          |flex|grid|block|inline|inline-block|inline-flex|hidden|contents|relative|absolute|fixed|sticky|static|truncate|sr-only|visible
+          |invisible|grow|shrink|italic|underline|uppercase|lowercase|capitalize
+        )$
+        """, RegexOptions.IgnorePatternWhitespace)]
+    private static partial Regex UtilityClass();
+
     // Ids web frameworks number at runtime: React's useId (":r1a:", "«r1»", "_r_b3r_"; Discord uses
     // the last), also inside library ids like "radix-:r2:"; MUI, jQuery UI, Ember, Ext JS, React Aria
     // and Angular Material counters ("mui-1234", "ui-id-3", "ember412", "mat-input-0").
     // (Colon ids from JSF, like "form:results:table", are stable: React's need a "-" or nothing around them.)
-    [GeneratedRegex(@"(?:^|-)[:«]r[0-9a-z]{1,8}[:»](?:$|-)|(?:^|-)_r_[0-9a-z]{1,8}_(?:$|-)|^(?:mui|ui-id|ember|ext-gen|ext-comp|react-aria|mat-[a-z-]+?|cdk-[a-z-]+?)-?\d+(?:-\d+)?$")]
+    // Select2 numbers its inputs too ("s2id_autogen7", "select2-city-result-4x7k-12").
+    [GeneratedRegex(@"(?:^|-)[:«]r[0-9a-z]{1,8}[:»](?:$|-)|(?:^|-)_r_[0-9a-z]{1,8}_(?:$|-)|^(?:mui|ui-id|ember|ext-gen|ext-comp|react-aria|mat-[a-z-]+?|cdk-[a-z-]+?)-?\d+(?:-\d+)?$|^s2id_(?:autogen)?\d+|^select2-.*-\d+$")]
     private static partial Regex FrameworkGeneratedId();
 
     // WinForms/WPF designer defaults: "textBox17", "Panel_42", "button3".

@@ -66,13 +66,19 @@ public static partial class AccessibilityLocators
         "Built from Chromium's accessibility tree through UI Automation, without a debug port, and checked there rather than in the page. " +
         "Test ids (data-testid) can't be seen this way; start the app with --remote-debugging-port to use them.";
 
+    // Which browser a script opens: Edge for Edge and WebView2, Firefox for Firefox, Chrome otherwise (Chrome, Electron).
+    private static BrowserFlavor Flavor(WebAppLaunch? launch) =>
+        launch?.ProcessName.StartsWith("msedge", StringComparison.OrdinalIgnoreCase) == true || launch?.Kind == WebAppKind.WebView2 ? BrowserFlavor.Edge
+        : launch?.ProcessName.Equals("firefox", StringComparison.OrdinalIgnoreCase) == true ? BrowserFlavor.Firefox
+        : BrowserFlavor.Chrome;
+
     /// <param name="native">The verified native selector for the element.</param>
     /// <param name="path">Desktop first, the element last.</param>
     /// <param name="pageUrl">The page's URL (the document's UIA value), for finding the page in scripts.</param>
     public static WebResult FromSelector(SelectorResult native, IReadOnlyList<ElementInfo> path, string? pageUrl, WebAppLaunch? launch)
     {
         var pageIndex = IndexOfPage(path, 0);
-        if (pageIndex < 0) return WebResult.Unavailable("This element isn't inside a Chromium web page.");
+        if (pageIndex < 0) return WebResult.Unavailable("This element isn't inside a web page (Chromium or Firefox).");
         if (pageIndex == path.Count - 1) return WebResult.Unavailable("That's the whole web page; pick an element inside it.");
         if (native.Best is not { } selector || selector.Steps.Count == 0)
         {
@@ -130,8 +136,7 @@ public static partial class AccessibilityLocators
             PageUrl = pageUrl ?? "",
             PageTitle = path[pageIndex].Name,
             UrlPrefix = pageUrl is null ? "" : WebBridge.UrlPrefix(pageUrl),
-            Browser = launch?.ProcessName.StartsWith("msedge", StringComparison.OrdinalIgnoreCase) == true || launch?.Kind == WebAppKind.WebView2
-                ? BrowserFlavor.Edge : BrowserFlavor.Chrome,
+            Browser = Flavor(launch),
             Element = new WebElementSummary
             {
                 Tag = role ?? target.ControlType.ToLowerInvariant(),
@@ -176,7 +181,7 @@ public static partial class AccessibilityLocators
         var target = path[^1];
         if (path.Count < 2 || Role(target) is not { } role || target.Name.Trim().Length == 0) return web;
 
-        var page = path.Last(e => e is { FrameworkId: "Chrome", ControlType: "Document", AutomationId: "RootWebArea" });
+        var page = path.Last(WebApps.IsWebPage);
         foreach (var sibling in tree.PreviousSiblings(target, MaxLabelDistance))
         {
             var type = sibling.ControlType;
@@ -238,7 +243,7 @@ public static partial class AccessibilityLocators
             if (FrameLocator(path[i - 1]) is not { } frame) return web;
             frames.Add(frame);
         }
-        var page = path.Last(e => e is { FrameworkId: "Chrome", ControlType: "Document", AutomationId: "RootWebArea" });
+        var page = path.Last(WebApps.IsWebPage);
         var texts = (tree.Descendants(target, MaxLandmarkScan) ?? []).Where(d => d.ControlType == "Text").Take(MaxInnerTexts);
         foreach (var text in texts)
         {
@@ -256,8 +261,7 @@ public static partial class AccessibilityLocators
                 PageUrl = pageUrl ?? "",
                 PageTitle = path[pageIndex].Name,
                 UrlPrefix = pageUrl is null ? "" : WebBridge.UrlPrefix(pageUrl),
-                Browser = launch?.ProcessName.StartsWith("msedge", StringComparison.OrdinalIgnoreCase) == true || launch?.Kind == WebAppKind.WebView2
-                    ? BrowserFlavor.Edge : BrowserFlavor.Chrome,
+                Browser = Flavor(launch),
                 Notes = [SourceNote],
             };
             return source with
@@ -423,7 +427,7 @@ public static partial class AccessibilityLocators
     {
         for (var i = start; i < path.Count; i++)
         {
-            if (path[i] is { FrameworkId: "Chrome", ControlType: "Document", AutomationId: "RootWebArea" }) return i;
+            if (WebApps.IsWebPage(path[i])) return i;
         }
         return -1;
     }

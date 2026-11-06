@@ -188,6 +188,13 @@ public enum BrowserFlavor
 
     /// <summary>Edge and WebView2: Selenium uses EdgeOptions/msedgedriver.</summary>
     Edge,
+
+    /// <summary>
+    /// Firefox: Playwright drives its own build of Firefox (installed once with "playwright install
+    /// firefox"); Selenium uses geckodriver and the installed Firefox. No attaching: Firefox has no
+    /// Chromium debug port.
+    /// </summary>
+    Firefox,
 }
 
 /// <summary>Result of the CDP web bridge for one element.</summary>

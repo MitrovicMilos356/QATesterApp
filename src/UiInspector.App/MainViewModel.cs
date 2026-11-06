@@ -56,11 +56,22 @@ public sealed partial class MainViewModel : ObservableObject
 
     private const int BugReportTabIndex = 1;
 
-    /// <summary>The top-level tab: 0 Inspector, 1 Bug report.</summary>
+    /// <summary>The top-level tab: 0 Inspector, 1 Bug report, 2 Test plan.</summary>
     [ObservableProperty]
     private int _selectedMainTab;
 
+    private const int TestPlanTabIndex = 2;
+
+    // The test plan's outline stays while its row is selected, but not once the tab is left.
+    partial void OnSelectedMainTabChanged(int value)
+    {
+        if (value != TestPlanTabIndex) Testability?.HideOutline();
+    }
+
     public RecorderViewModel Recorder { get; }
+
+    /// <summary>Set once by the window, which also gives it the Inspector's selection.</summary>
+    public TestabilityViewModel? Testability { get; set; }
 
     public BugReportViewModel BugReport { get; }
 

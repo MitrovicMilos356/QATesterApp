@@ -124,6 +124,45 @@ public sealed class ElementInspector
         }
     }
 
+    /// <summary>
+    /// Reads <paramref name="root"/> and everything below it (control view) in one UIA call,
+    /// for analysing a whole window. Stops copying after <paramref name="maxElements"/>.
+    /// </summary>
+    internal ElementNode? ReadSubtree(AutomationBase automation, AutomationElement root, int maxElements, out bool truncated)
+    {
+        var patterns = GetCacheablePatterns(automation);
+        var request = CreateCacheRequest(automation, patterns);
+        request.TreeScope = TreeScope.Subtree;
+        request.TreeFilter = new FlaUI.Core.Conditions.PropertyCondition(automation.PropertyLibrary.Element.IsControlElement, true);
+        var count = 0;
+        var cut = false;
+
+        ElementNode Copy(AutomationElement element)
+        {
+            count++;
+            var children = new List<ElementNode>();
+            foreach (var child in element.CachedChildren)
+            {
+                if (count >= maxElements)
+                {
+                    cut = true;
+                    break;
+                }
+                children.Add(Copy(child));
+            }
+            return new ElementNode(ReadInfo(element, patterns), children);
+        }
+
+        // Cached values can only be read while their request is active, so the copy happens inside it.
+        using (request.Activate())
+        {
+            var cached = root.FrameworkAutomationElement.GetUpdatedCache();
+            var node = cached is null ? null : Copy(cached);
+            truncated = cut;
+            return node;
+        }
+    }
+
     // Chromium-based hosts (Chrome, Edge, Electron, WebView2, CEF) report FrameworkId "Chrome"
     // and expose each page as a Document with AutomationId "RootWebArea".
     private static bool IsChromiumPageRoot(ElementInfo info) =>

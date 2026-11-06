@@ -47,16 +47,29 @@ public static class WindowCapture
         //   Win32/WinForms windows, but DirectX-drawn content comes out black.
         // So: the compositor's copy for windows fully on screen, the window's own painting otherwise,
         // and the other one whenever the first comes out blank.
+        // On screen means its visible frame: a maximized window's outer rectangle reaches a few pixels past
+        // the monitor (its invisible borders), and treating it as off-screen gave black Chromium captures.
         var client = ClientArea(window, outer);
-        uint[] order = IsFullyOnScreen(outer) ? [PW_RENDERFULLCONTENT, 0] : [0, PW_RENDERFULLCONTENT];
+        uint[] order = IsFullyOnScreen(visible) ? [PW_RENDERFULLCONTENT, 0] : [0, PW_RENDERFULLCONTENT];
         Bitmap? full = null;
+        var fullQuality = int.MaxValue;
         foreach (var flags in order)
         {
             var attempt = Print(window, width, height, flags);
             if (attempt is null) continue;
-            full?.Dispose();
-            full = attempt;
-            if (!IsBlank(attempt, client)) break;
+            // The other way is only tried when this one shows nothing: empty, or black where DirectX
+            // content (Chromium, WPF) wasn't painted. The better of the two is kept.
+            var quality = IsBlank(attempt, client) ? 2 : IsMostlyBlack(attempt, client) ? 1 : 0;
+            if (quality < fullQuality)
+            {
+                full?.Dispose();
+                (full, fullQuality) = (attempt, quality);
+            }
+            else
+            {
+                attempt.Dispose();
+            }
+            if (fullQuality == 0) break;
         }
         if (full is null) return null;
         using var _ = full;
@@ -75,6 +88,43 @@ public static class WindowCapture
         }
         var bounds = new Rectangle(outer.Left + crop.X, outer.Top + crop.Y, crop.Width, crop.Height);
         return new WindowImage(Encode(image), bounds, scale, image.Width, image.Height);
+    }
+
+    /// <summary>An element to outline (screen pixels) with its number.</summary>
+    public sealed record NumberedMark(Rectangle Bounds, int Number, Color Color);
+
+    /// <summary>The window image, plus a copy with every mark outlined in its color and numbered.</summary>
+    public static StepScreenshot MarkNumbered(WindowImage window, IEnumerable<NumberedMark> marks)
+    {
+        using var stream = new MemoryStream(window.Png);
+        using var decoded = new Bitmap(stream);
+        using var image = new Bitmap(decoded);
+        using (var g = Graphics.FromImage(image))
+        {
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            using var font = new Font("Segoe UI", 8f, FontStyle.Bold, GraphicsUnit.Point);
+            foreach (var mark in marks)
+            {
+                if (mark.Bounds is not { Width: > 0, Height: > 0 } rect || !rect.IntersectsWith(window.ScreenBounds)) continue;
+                var x = (float)((rect.X - window.ScreenBounds.X) * window.Scale);
+                var y = (float)((rect.Y - window.ScreenBounds.Y) * window.Scale);
+                var w = (float)(rect.Width * window.Scale);
+                var h = (float)(rect.Height * window.Scale);
+                using var pen = new Pen(mark.Color, 2);
+                g.DrawRectangle(pen, x - 1, y - 1, w + 2, h + 2);
+
+                // The number in a small tag at the top-left corner, kept inside the image.
+                var label = mark.Number.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                var size = g.MeasureString(label, font);
+                var tag = new RectangleF(Math.Max(0, x - 1), Math.Max(0, y - size.Height - 1), size.Width + 2, size.Height);
+                if (tag.Y <= 0) tag.Y = Math.Max(0, y);
+                using var fill = new SolidBrush(mark.Color);
+                g.FillRectangle(fill, tag);
+                g.DrawString(label, font, Brushes.White, tag.X + 1, tag.Y);
+            }
+        }
+        return new StepScreenshot(window.Png, Encode(image), window.Width, window.Height);
     }
 
     /// <summary>The step's screenshot: the window image, plus a copy with <paramref name="element"/> (screen pixels) outlined.</summary>
@@ -146,6 +196,35 @@ public static class WindowCapture
             }
         }
         return true;
+    }
+
+    /// <summary>Most of the client area is (near) black: what DirectX content looks like when the window paints itself.</summary>
+    internal static bool IsMostlyBlack(Bitmap bitmap, Rectangle client)
+    {
+        var (color, share) = Dominant(bitmap, client);
+        var c = Color.FromArgb(color);
+        return share >= 0.6 && c is { R: < 16, G: < 16, B: < 16 };
+    }
+
+    /// <summary>The most common color in a grid of samples of the client area, and the share of samples that have it.</summary>
+    private static (int Color, double Share) Dominant(Bitmap bitmap, Rectangle client)
+    {
+        client.Intersect(new Rectangle(0, 0, bitmap.Width, bitmap.Height));
+        if (client.Width < 4 || client.Height < 4) return (0, 0);
+        const int grid = 24;
+        var counts = new Dictionary<int, int>();
+        for (var i = 0; i < grid; i++)
+        {
+            for (var j = 0; j < grid; j++)
+            {
+                var x = client.X + (int)((i + 0.5) * client.Width / grid);
+                var y = client.Y + (int)((j + 0.5) * client.Height / grid);
+                var color = bitmap.GetPixel(x, y).ToArgb();
+                counts[color] = counts.GetValueOrDefault(color) + 1;
+            }
+        }
+        var top = counts.MaxBy(c => c.Value);
+        return (top.Key, (double)top.Value / (grid * grid));
     }
 
     private static byte[] Encode(Bitmap bitmap)

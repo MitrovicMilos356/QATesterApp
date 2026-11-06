@@ -15,7 +15,6 @@ namespace UiInspector.Core.Tests;
 /// </summary>
 public class EdgeWebFixture : IDisposable
 {
-    public const string Title = "UiInspector Web Fixture";
     private const string EdgePath = @"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
     private const int PreferredPort = 9339;
 
@@ -23,6 +22,9 @@ public class EdgeWebFixture : IDisposable
 
     /// <summary>9339 when free (so saved snippets are stable), otherwise any free port; 0 without a debug port.</summary>
     public int Port { get; }
+
+    /// <summary>The page's title, and so the window's: each fixture has its own, since test classes run in parallel.</summary>
+    public string Title { get; }
 
     public EdgeWebFixture() : this(withDebugPort: true)
     {
@@ -32,10 +34,11 @@ public class EdgeWebFixture : IDisposable
     {
         if (!File.Exists(EdgePath)) throw new InvalidOperationException("Microsoft Edge is required for the web bridge tests.");
         Port = !withDebugPort ? 0 : IsPortFree(PreferredPort) ? PreferredPort : FreePort();
+        Title = withDebugPort ? "UiInspector Web Fixture" : "UiInspector Web Fixture (no port)";
 
-        var page = new Uri(Path.Combine(AppContext.BaseDirectory, "Fixtures", "web_fixture.html")).AbsoluteUri;
+        var page = new Uri(Path.Combine(AppContext.BaseDirectory, "Fixtures", "web_fixture.html")).AbsoluteUri + "?title=" + Uri.EscapeDataString(Title);
         var port = withDebugPort ? $"--remote-debugging-port={Port} " : "";
-        Process.Start(new ProcessStartInfo(EdgePath,
+        var start = new ProcessStartInfo(EdgePath,
             // --disable-sync: a fresh profile otherwise signs in with the Windows account and opens a sync dialog.
             // The backgrounding switches keep the off-screen window rendering, as an on-screen app would; Chromium
             // updates its accessibility tree with rendering, so without them changes show up late or not at all.
@@ -43,7 +46,29 @@ public class EdgeWebFixture : IDisposable
             "--disable-backgrounding-occluded-windows --disable-renderer-backgrounding --disable-background-timer-throttling " +
             // Shell-started, so Edge doesn't inherit the test runner's output handles: a leftover Edge
             // holding them would keep `dotnet test` waiting after the tests finish.
-            $"--window-position=-3000,-3000 --window-size=900,820 --app=\"{page}\"") { UseShellExecute = true })?.Dispose();
+            $"--window-position=-3000,-3000 --window-size=900,820 --app=\"{page}\"") { UseShellExecute = true };
+        // The shell occasionally reports a COM error while Edge starts anyway: check for the window instead
+        // of giving up, and clean up by profile if it never comes.
+        try
+        {
+            Process.Start(start)?.Dispose();
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            Thread.Sleep(1000);
+            if (OwnProcessIds().Count == 0)
+            {
+                try
+                {
+                    Process.Start(start)?.Dispose();
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    Dispose();
+                    throw;
+                }
+            }
+        }
 
         using var automation = new UIA3Automation();
         var ready = Retry.WhileFalse(() =>

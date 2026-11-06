@@ -46,6 +46,7 @@ public sealed class Recorder : IAsyncDisposable
 
     // Only resolves input at the moment it happens (hit-test, tree snapshot), so it never waits behind other work.
     private readonly UiaWorker _atInput = new(new UiaWorkerOptions { OperationTimeout = TimeSpan.FromSeconds(3) });
+    private static readonly TimeSpan SlowAppTimeout = TimeSpan.FromSeconds(10);
     private readonly Lock _gate = new();
     private readonly Dictionary<int, TreeSnapshot> _clickTrees = [];
     private readonly StepBuilder _builder;
@@ -308,7 +309,7 @@ public sealed class Recorder : IAsyncDisposable
         var tracked = _text.Field;
         if (tracked is null) return null;
         if (focusedAtInput is not null && focusedAtInput.Element.IsSameElement(tracked.Element)) return focusedAtInput.Text;
-        return await _snapshots.RunAsync(_ => ReadText(tracked), _lifetime.Token);
+        return await RunPatientlyAsync(_snapshots, _ => ReadText(tracked));
     }
 
     // ---------------------------------------------------------------- captured at the moment of input
@@ -332,9 +333,26 @@ public sealed class Recorder : IAsyncDisposable
         _ => input,
     };
 
+    /// <summary>
+    /// Runs <paramref name="work"/> with the usual 3 s limit, and once more with <see cref="SlowAppTimeout"/>
+    /// if it runs out: on a busy PC or in a heavy app a read can take longer, and a slow step beats a
+    /// lost one. Only a frozen app makes the step fail.
+    /// </summary>
+    private async Task<T> RunPatientlyAsync<T>(UiaWorker worker, Func<AutomationBase, T> work)
+    {
+        try
+        {
+            return await worker.RunAsync(work, _lifetime.Token);
+        }
+        catch (UiaTimeoutException)
+        {
+            return await worker.RunAsync(work, _lifetime.Token, SlowAppTimeout);
+        }
+    }
+
     private async Task<AtInput> ResolveAsync(Func<AutomationBase, AtInput> resolve)
     {
-        var at = await _atInput.RunAsync(resolve, _lifetime.Token);
+        var at = await RunPatientlyAsync(_atInput, resolve);
         if (at.Path is null || !CaptureScreenshots) return at;
         var handle = WindowHandle(at.Path);
         return handle == IntPtr.Zero ? at : at with { Image = await CaptureAsync(handle) };
@@ -401,12 +419,12 @@ public sealed class Recorder : IAsyncDisposable
     private async Task OnElementClickAsync(ElementClick c)
     {
         var tracked = _text.Field;
-        var (hit, tree, focused, trackedText) = await _snapshots.RunAsync(a =>
+        var (hit, tree, focused, trackedText) = await RunPatientlyAsync(_snapshots, a =>
         {
             var hit = _inspector.InspectElement(a, c.Element);
             var tree = hit is not null && ClickPath(hit) is { } clicked ? TryCaptureTree(a, clicked) : null;
             return (hit, tree, FocusedField(a), ReadText(tracked));
-        }, _lifetime.Token);
+        });
 
         var entries = _text.Update(focused, trackedText);
         var path = hit is null ? null : ClickPath(hit);
@@ -439,7 +457,7 @@ public sealed class Recorder : IAsyncDisposable
         }
 
         // Shortcut keys were resolved when they went down; other keys are resolved now.
-        var at = early is not null ? await early : await _snapshots.RunAsync(ResolveKey, _lifetime.Token);
+        var at = early is not null ? await early : await RunPatientlyAsync(_snapshots, ResolveKey);
         var tree = at.Tree;
         var path = at.Path;
         var entries = _text.Update(at.Focused, await TrackedTextAsync(at.Focused));
@@ -455,11 +473,11 @@ public sealed class Recorder : IAsyncDisposable
     private async Task OnFocusAsync(AutomationElement element)
     {
         var tracked = _text.Field;
-        var (field, trackedText) = await _snapshots.RunAsync(a =>
+        var (field, trackedText) = await RunPatientlyAsync(_snapshots, a =>
         {
             var inspection = _inspector.InspectElement(a, element);
             return (inspection is null ? null : Field(inspection), ReadText(tracked));
-        }, _lifetime.Token);
+        });
         var entries = _text.Update(field, trackedText);
         var (textShots, _) = await ScreenshotsAsync(entries, null);
         Apply(b => AddTexts(b, entries, textShots), null);
@@ -468,12 +486,12 @@ public sealed class Recorder : IAsyncDisposable
     private async Task OnCheckAsync(CheckRequest request)
     {
         var tracked = _text.Field;
-        var (hit, focused, trackedText, text, source) = await _snapshots.RunAsync(a =>
+        var (hit, focused, trackedText, text, source) = await RunPatientlyAsync(_snapshots, a =>
         {
             var hit = request.Element is { } element ? _inspector.InspectElement(a, element) : _inspector.InspectAtPoint(a, request.Point);
             var (text, source) = hit is null ? (null, TextSource.Value) : CheckText(hit, SmartTarget.FindIndex(hit));
             return (hit, FocusedField(a), ReadText(tracked), text, source);
-        }, _lifetime.Token);
+        });
 
         var entries = _text.Update(focused, trackedText);
         var path = hit is null || hit.Element.ProcessId == OwnProcessId || hit.AncestorsTruncated ? null : SmartPath(hit);
@@ -491,7 +509,7 @@ public sealed class Recorder : IAsyncDisposable
     private async Task OnFlushAsync()
     {
         var tracked = _text.Field;
-        var (focused, trackedText) = await _snapshots.RunAsync(a => (FocusedField(a), ReadText(tracked)), _lifetime.Token);
+        var (focused, trackedText) = await RunPatientlyAsync(_snapshots, a => (FocusedField(a), ReadText(tracked)));
         var entries = _text.Update(focused, trackedText);
         var (textShots, _) = await ScreenshotsAsync(entries, null);
         Apply(b => AddTexts(b, entries, textShots), null);
@@ -634,7 +652,7 @@ public sealed class Recorder : IAsyncDisposable
     /// </summary>
     private async Task<Web.WebResult?> WebLocatorsAsync(IReadOnlyList<ElementInfo> path, SelectorResult? result, Selector? fallback, TreeSnapshot? tree)
     {
-        if (path[^1].FrameworkId != "Chrome") return null;
+        if (!Web.WebApps.IsWebContent(path)) return null;
         var native = result?.Best is not null ? result : result is not null && fallback is not null ? result with { Best = fallback } : null;
         if (native is null) return null;
         try

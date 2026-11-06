@@ -194,7 +194,7 @@ public static class BugReportRenderer
         string.IsNullOrWhiteSpace(text) ? $"<span class=\"empty\">{Placeholder}</span>" : $"<span class=\"notes\">{H(text.Trim())}</span>";
 
     // Only the characters HTML needs: the file is UTF-8, so “quotes”, ×, · and accents stay readable.
-    private static string H(string text) => text
+    internal static string H(string text) => text
         .Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;").Replace("'", "&#39;");
 
     // ------------------------------------------------------------------ Markdown

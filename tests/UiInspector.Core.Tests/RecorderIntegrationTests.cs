@@ -56,6 +56,7 @@ public class RecorderIntegrationTests(RecorderFixtureWindow fixture) : IClassFix
     private readonly RecorderFixtureWindow _fixture = fixture;
     private AutomationElement? _focused;
     private Recorder _recorder = null!;
+    private readonly List<string> _notices = [];
 
     public Task InitializeAsync()
     {
@@ -67,6 +68,7 @@ public class RecorderIntegrationTests(RecorderFixtureWindow fixture) : IClassFix
             ClickSettings = new ClickSettings(500, new System.Drawing.Size(4, 4), new System.Drawing.Size(4, 4)),
             FocusOverride = _ => _focused, // never the user's real focused element
         });
+        _recorder.Notice += message => { lock (_notices) _notices.Add(message); };
         return Task.CompletedTask;
     }
 
@@ -129,9 +131,9 @@ public class RecorderIntegrationTests(RecorderFixtureWindow fixture) : IClassFix
         await _recorder.CheckOnAsync(status);
 
         var steps = await WaitForSelectorsAsync();
-        Assert.Equal(
-            [RecordedAction.SetValue, RecordedAction.SetValue, RecordedAction.Click, RecordedAction.Click, RecordedAction.Click, RecordedAction.CheckText],
-            steps.Select(s => s.Action));
+        Assert.True(
+            steps.Select(s => s.Action).SequenceEqual([RecordedAction.SetValue, RecordedAction.SetValue, RecordedAction.Click, RecordedAction.Click, RecordedAction.Click, RecordedAction.CheckText]),
+            $"steps: {string.Join(", ", steps.Select(s => s.Action))}; recorder said: {string.Join(" | ", _notices)}");
 
         Assert.Equal("Hello from the recorder", steps[0].Text); // the click into the box became the typed text
         Assert.True(steps[1].IsSecret);

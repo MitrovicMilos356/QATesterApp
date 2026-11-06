@@ -18,6 +18,7 @@ public partial class MainWindow : Window
     private readonly MainViewModel _viewModel;
     private readonly Recorder _recorder;
     private readonly BugReportViewModel _bugReport;
+    private readonly TestabilityViewModel _testability;
     private bool _tickRunning;
 
     public MainWindow()
@@ -30,7 +31,15 @@ public partial class MainWindow : Window
         _bugReport = new BugReportViewModel(_recorder, Dispatcher);
         var replayer = new Replayer(_replayWorker);
         _viewModel = new MainViewModel(service, _overlay, new RecorderViewModel(_recorder, replayer, _overlay, Dispatcher), _bugReport);
+        // Analysing a window takes seconds; it shares the replay's worker, so inspecting stays responsive meanwhile.
+        _testability = new TestabilityViewModel(new Core.Testability.TestabilityAnalyzer(_replayWorker, inspector), service, _overlay, Dispatcher,
+            () => _viewModel.SelectedNode?.Info);
+        _viewModel.Testability = _testability;
         DataContext = _viewModel;
+        _testability.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(TestabilityViewModel.PreviewUri) && _testability.PreviewUri is { } uri) TestabilityBrowser.Navigate(uri);
+        };
 
         // WebBrowser.Source isn't reliably bindable; navigate whenever a new preview file is written.
         _bugReport.PropertyChanged += (_, e) =>
@@ -100,6 +109,19 @@ public partial class MainWindow : Window
         }, DispatcherPriority.Loaded);
     }
 
+    // A right-click selects the row first, so the context menu copies from the row that was clicked.
+    private void TestCases_PreviewMouseRightButtonDown(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        for (var node = e.OriginalSource as DependencyObject; node is not null; node = System.Windows.Media.VisualTreeHelper.GetParent(node))
+        {
+            if (node is DataGridRow row)
+            {
+                row.IsSelected = true;
+                return;
+            }
+        }
+    }
+
     private static ScrollViewer? FindScrollViewer(DependencyObject parent)
     {
         for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
@@ -120,6 +142,7 @@ public partial class MainWindow : Window
         Task.Run(() => _recorder.DisposeAsync().AsTask()).Wait(TimeSpan.FromSeconds(3));
         _overlay.Close();
         _bugReport.Dispose();
+        _testability.Dispose();
         _worker.Dispose();
         _replayWorker.Dispose();
     }

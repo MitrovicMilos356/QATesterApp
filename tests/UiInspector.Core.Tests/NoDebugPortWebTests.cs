@@ -79,6 +79,77 @@ public class NoDebugPortWebTests(EdgeNoPortFixture fixture) : IClassFixture<Edge
         Assert.NotNull(Retry.WhileNull(() => Window.FindFirstDescendant(_automation.ConditionFactory.ByName("email: probe@example.com")), TimeSpan.FromSeconds(3)).Result);
     }
 
+    // In a browser only the page is the app under test: Edge's own toolbar isn't graded.
+    [Fact]
+    public async Task Testability_GradesOnlyThePage_AndFlagsTheChangingReactId()
+    {
+        var checkout = Find(w => ByName(w, ControlType.Button, "Checkout"));
+        var info = _inspector.InspectElement(_automation, checkout)!.Element;
+
+        var report = await new Testability.TestabilityAnalyzer(_worker, _inspector).AnalyzeAsync(info);
+
+        Assert.All(report.Findings, f => Assert.Contains(f.Path, e => e is { ControlType: "Document", AutomationId: "RootWebArea" }));
+        Assert.Equal("Chrome", report.Frameworks[0]);
+        var search = report.Findings.Single(f => f.Element.AutomationId == "_r_b3r_");
+        Assert.True(search.Problems.HasFlag(Testability.TestabilityProblem.ChangingId));
+        Assert.Contains("data-testid=\"search-friends-field\"", search.Fix);
+        Assert.Equal(Testability.TestabilityGrade.Fair, search.Grade); // found by its label meanwhile
+    }
+
+    // The test plan finds the sign-in form and puts its main flow together as a Playwright script
+    // from the same locators the recorder would use; the password comes from an environment variable.
+    [Fact]
+    public async Task TestPlan_FindsTheLogin_WithCasesAndAScript()
+    {
+        var checkout = Find(w => ByName(w, ControlType.Button, "Checkout"));
+        var report = await new Testability.TestabilityAnalyzer(_worker, _inspector).AnalyzeAsync(_inspector.InspectElement(_automation, checkout)!.Element);
+
+        var plan = report.Plan!;
+        Assert.True(plan.IsWeb);
+        var login = plan.Features[0];
+        Assert.Equal(TestIdeas.FeatureKind.Login, login.Kind);
+        Assert.Equal("Sign in", login.Action?.Element.Name);
+        Assert.True(login.Cases.Count >= 30, $"{login.Cases.Count} cases");
+        var script = login.Scripts.Single(s => s.Id == "playwright-py").Code;
+        Assert.Contains("page.locator(\"#login-user\")", script);
+        Assert.Contains("fill(\"tester@example.com\")", script);
+        Assert.Contains("secret(\"UIINSPECTOR_SECRET_1\")", script);
+        Assert.Contains("get_by_role(\"button\", name=\"Sign in\", exact=True)", script);
+        Assert.DoesNotContain("Recorded with UiInspector", script);
+        Assert.Contains(plan.Features, f => f.Kind == TestIdeas.FeatureKind.Search);
+        Assert.Equal(TestIdeas.FeatureKind.Page, plan.Features[^1].Kind);
+    }
+
+    // The data-driven suites for the sign-in form and the (deliberately unsafe) comment form, saved
+    // for running with pytest and Playwright Test.
+    [Fact]
+    public async Task TestPlan_WritesDataDrivenSuites()
+    {
+        var checkout = Find(w => ByName(w, ControlType.Button, "Checkout"));
+        var report = await new Testability.TestabilityAnalyzer(_worker, _inspector).AnalyzeAsync(_inspector.InspectElement(_automation, checkout)!.Element);
+        var plan = report.Plan!;
+        var login = plan.Features.Single(f => f.Kind == TestIdeas.FeatureKind.Login);
+        var comment = plan.Features.Single(f => f.Fields.Any(x => x.Label == "Comment"));
+
+        var dir = Path.Combine(AppContext.BaseDirectory, "generated", "suites");
+        Directory.CreateDirectory(dir);
+        foreach (var (feature, name) in new[] { (login, "login"), (comment, "comment") })
+        {
+            var py = feature.Suites.Single(s => s.Id == "suite-playwright-py").Code;
+            var js = feature.Suites.Single(s => s.Id == "suite-playwright-js").Code;
+            File.WriteAllText(Path.Combine(dir, $"{name}_test.py"), py);
+            File.WriteAllText(Path.Combine(dir, $"{name}.spec.js"), js);
+            Assert.Contains("@pytest.mark.parametrize", py);
+            Assert.Contains("page.on(\"dialog\"", py);
+            Assert.Contains("for (const [id, title, field, value, expected] of CASES)", js);
+        }
+        var loginPy = login.Suites.Single(s => s.Id == "suite-playwright-py").Code;
+        Assert.Contains("page.locator(\"#login-user\").fill(values[\"login_email\"])", loginPy);
+        Assert.Contains("\"a\" * 1000", loginPy);                       // long values as code, not as 1,000 letters
+        Assert.Contains("def test_password_is_hidden(browser):", loginPy);
+        Assert.Contains("def test_unknown_user_and_wrong_password_get_the_same_message(browser):", loginPy);
+    }
+
     // Regression (Discord's friend search): React's useId ids change every run, so the field is found
     // by its label instead, and replay types into it.
     [Fact]
@@ -287,6 +358,29 @@ public class WebScriptStartModeTests
     };
 
     private static string Code(WebResult web, string id) => WebCodeTemplates.Render(web).Single(s => s.Id == id).Code;
+
+    // A page in Firefox: every script opens its own Firefox (Playwright's build, Selenium's geckodriver).
+    [Fact]
+    public void FirefoxPage_GetsFirefoxScriptsInEveryLanguage()
+    {
+        var web = App(WebAppKind.Browser, @"C:\Program Files\Mozilla Firefox\firefox.exe", "firefox") with { Browser = BrowserFlavor.Firefox };
+
+        var js = Code(web, "playwright-js");
+        Assert.Contains("const { firefox } = require('playwright');", js);
+        Assert.Contains("await firefox.launch({ headless: false })", js);
+        Assert.Contains("npx playwright install firefox", js);
+        Assert.Contains("Opens its own Firefox window", js);
+        Assert.DoesNotContain("chromium", js);
+
+        var py = Code(web, "playwright-py");
+        Assert.Contains("browser = p.firefox.launch(headless=False)", py);
+        Assert.Contains("page.goto(\"https://app.example.com/orders\")", py);
+        Assert.Contains("playwright.Firefox.LaunchAsync(new() { Headless = false })", Code(web, "playwright-cs"));
+        Assert.Contains("webdriver.Firefox()", Code(web, "selenium-py"));
+        var java = Code(web, "selenium-java");
+        Assert.Contains("import org.openqa.selenium.firefox.FirefoxDriver;", java);
+        Assert.Contains("new FirefoxDriver(", java);
+    }
 
     [Fact]
     public void ElectronApp_IsStartedWithAPortByTheScript()

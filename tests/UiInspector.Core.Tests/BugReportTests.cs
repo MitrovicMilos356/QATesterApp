@@ -6,6 +6,25 @@ namespace UiInspector.Core.Tests;
 
 public class BugReportTests
 {
+    // A maximized Chromium window painted by itself comes out black except its frame: that's not a
+    // picture to keep. Pages that are white, or dark themes like Discord's, are.
+    [Theory]
+    [InlineData(0x000000, true)]
+    [InlineData(0x0A0A0A, true)]
+    [InlineData(0xFFFFFF, false)]
+    [InlineData(0x313338, false)]
+    public void MostlyBlackCapture_IsRecognized(int background, bool expected)
+    {
+        using var image = new System.Drawing.Bitmap(400, 300);
+        using (var g = System.Drawing.Graphics.FromImage(image))
+        {
+            g.Clear(System.Drawing.Color.FromArgb(255, System.Drawing.Color.FromArgb(background)));
+            g.FillRectangle(System.Drawing.Brushes.White, 0, 0, 400, 30);       // a title bar
+            g.DrawRectangle(System.Drawing.Pens.Red, 50, 80, 120, 40);          // an outline drawn on it
+        }
+        Assert.Equal(expected, WindowCapture.IsMostlyBlack(image, new System.Drawing.Rectangle(0, 0, 400, 300)));
+    }
+
     // Stand-ins for screenshots: distinct bytes, so tests can see which image went where.
     private static StepScreenshot Shot(byte marker) => new([0x89, 0x50, marker, 1], [0x89, 0x50, marker, 2], 10, 10);
 

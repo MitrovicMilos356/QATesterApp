@@ -70,9 +70,16 @@ Other verified selectors for the same element are in the drop-down above the ste
 
 ### Web apps: Playwright and Selenium code
 
-For an element inside a Chromium page (Chrome, Edge, Electron apps like Discord, Slack or VS
-Code, WebView2 apps), the Selector tab and the Recorder also give Playwright (JavaScript, Python,
-C#) and Selenium (Python, Java) code. **No special setup is needed:**
+For an element inside a web page (Chrome, Edge, Electron apps like Discord, Slack or VS Code,
+WebView2 apps, and Firefox), the Selector tab, the Recorder and the Test plan also give Playwright
+(JavaScript, Python, C#) and Selenium (Python, Java) code. Desktop apps that aren't web pages
+(WinForms, WPF, WinUI, Win32, Qt) get FlaUI, uiautomation, pywinauto and Appium only: Playwright
+and Selenium drive web content, not native windows. **No special setup is needed:**
+
+- **Firefox:** the scripts open their own Firefox. Playwright uses its own build of Firefox, so
+  install it once (`playwright install firefox`, or `npx playwright install firefox`); Selenium uses
+  the installed Firefox through geckodriver. Attaching to a running Firefox isn't possible (that
+  needs Chromium's debug port), and Firefox's locators always come from the accessibility tree.
 
 - **Locators come from the accessibility tree.** Chromium shows UI Automation each element's ARIA
   role, accessible name, HTML `id` and classes, so the inspector builds `getByRole('button', { name: 'Save' })`,
@@ -217,6 +224,166 @@ Screenshots show only the app's own window (it's asked to draw itself), never th
 other apps and overlapping windows don't appear. Switch them off with **Screenshots** in the
 Recorder tab. The preview files are kept in a temporary folder that's deleted when the app closes.
 
+### Test plan: what to test, and how
+
+The **Test plan** tab looks at a window or web page and suggests what to test. Pick it with
+**Analyze window under cursor (3 s)**, or **Analyze picked element's window** for the element
+selected in the Inspector tab. Nothing in the app is clicked: the window is read in one go
+(about 1.5 s for a job site's page). Two views come out of that one read: **What to test**
+(below) and **Testability** (the next section).
+
+It finds the features from the page's structure, by control types, page landmarks and labels in
+English and Serbian/Croatian (and some German, French, Spanish):
+
+| Feature | Found by |
+| :--- | :--- |
+| Login / Registration | A password field with the fields and button next to it; two password fields make a sign-up |
+| Search | A search box (label, role or search landmark), even with drop-downs next to it |
+| Form | Fields that share a section with a button |
+| Filters | Check boxes, options and drop-downs outside forms; buttons with counts (*Programiranje [77]*) |
+| List | Many look-alike links or items with names of their own (job titles, not a row of "Save" buttons) |
+| Paging, Tabs, Menus, Navigation, Dialogs | Page numbers and Next; tab items; menus and drop-down buttons; the navigation landmark's links; dialogs |
+| The whole page or window | Always: keyboard only, screen reader, zoom, phone widths, refresh and Back, other browsers… |
+
+Each field is sorted by what it's for (email, password, phone, number, date, URL, name, free
+text, search, choice, check box), and gets **its own data table of test cases**: for a password,
+only symbols `!@#$%^&*()`, only digits, one shorter than the minimum, exactly the minimum, 1,000
+characters, only spaces, spaces at the ends, accents and Cyrillic, emoji, a common password, SQL
+injection, a script tag, hidden while typing, can't be copied out, can be pasted in, Caps Lock.
+Emails get missing @, two @, no domain, plus addressing, 254/255 characters; numbers get 0, −1,
+the limits ± 1, 1.5 and 1,5, huge numbers, letters; dates get 29 February in leap and normal
+years, 31 April, other formats; and so on. Features add their own cases (a login: wrong
+password and unknown user give the same message, locked after repeated failures, still logged
+in after refresh, logged out after Back…). A login on a web page comes to about 60 cases.
+
+Every case has an id (`LOGIN-07`), a kind (works, bad input, limits, security, accessibility,
+usability), a priority, steps that name the controls found (*Type the data below into the
+“Email” field*), the data, and the expected result. Where only the tester can know the rule
+(the minimum length, the exact message), the case says so instead of guessing. Filter the
+table by priority, kind or "worth automating".
+
+- **Select a row** to see its steps, the exact value in a box you can select, and buttons to
+  copy the value, the steps or the whole case (also by right-click, and Ctrl+C copies the value).
+  The value is exactly what to type: "1,000 × the letter a" copies the 1,000 characters, a value
+  shown in quotes copies its spaces without the quotes. Values only the tester can choose (their
+  own minimum length) copy as their description.
+- **The control is outlined in the app**, like a Ctrl pick, while its row or feature is selected:
+  a field further down the page is scrolled into view first. Leaving the tab removes the outline.
+- **Security cases say what a failure means**, under "If it fails". An alert from
+  `<script>alert('x')</script>` is harmless in itself, but proves the page runs code users type
+  (cross-site scripting): put in a link or a saved field, an attacker's code would run in other
+  people's browsers while they're logged in. The texts give the risk and how serious it is, for
+  XSS, SQL injection, `javascript:` links, user enumeration ("no such user" against "wrong
+  password"), unlimited login attempts, passwords in the address bar, and more.
+- **A login isn't a sign-up.** Password strength and email format rules apply where a password
+  or address is *created*; at login every wrong value just gets the same general message, so the
+  login's field cases expect exactly that.
+
+Only test security on apps you're allowed to test (your own, or with the owner's permission).
+If you find something on someone else's site, report it to them (many have a security contact or
+a `/.well-known/security.txt`) rather than testing further.
+
+**How:** each feature's main flow comes as a script in every language the recorder writes
+(Playwright and Selenium for web pages in Edge, Chrome, Electron apps and Firefox, without a
+debug port; FlaUI, uiautomation, pywinauto, Appium for any app), put together from the same verified selectors: fill the fields with
+sample data, the password from an environment variable, click the button. The other cases run
+by changing the typed values. Features with fragile controls say so.
+
+**Test suites: every case, run automatically.** For each feature with fields (and for a web
+page's navigation and lists), the script list starts with data-driven test suites:
+
+| Suite | For | Runs with |
+| :--- | :--- | :--- |
+| Playwright (Python, pytest) | Web pages in Edge, Chrome, Firefox | `pytest login_test.py -v` |
+| Playwright Test (JavaScript) | Web pages in Edge, Chrome, Firefox | `npx playwright test login.spec.js` |
+| Python uiautomation (pytest) | Desktop apps | `pytest login_test.py -v`, with the app open on the form |
+| FlaUI (C#, xUnit) | Desktop apps | `dotnet test` in a test project |
+
+Each suite holds the feature's cases as a table (id, title, field, exact value, expected) and runs
+them one by one: a fresh page (web), valid data in every field, the case's value in its field,
+then send. After each case it **checks automatically what can be checked without knowing the
+app**, and fails the case if:
+
+- an alert appeared, or a typed `<script>` is in the page as HTML: the page runs code from the
+  input (XSS);
+- the page shows database or crash text (`SQL syntax`, `SQLSTATE`, `ORA-…`, `Unclosed quotation
+  mark`, stack traces, `Internal Server Error`…): input reached the database unchecked, or the app
+  crashed and shows its insides;
+- the server answered with an error (5xx);
+- the password appears in the address;
+- (desktop) the window disappeared, or an error dialog opened.
+
+Every result is saved as a screenshot (`results/<case id>.png`). Whether the app gave the *right*
+answer ("refused with a message", "logged in") depends on the app, so each case carries its
+expected result and the suite has an empty `check_expected()` where you add checks once you know
+your app's messages. Web login suites also check that the password field hides what's typed, and
+(with `UIINSPECTOR_USER` set to a real test account) that an unknown user and a wrong password get
+the same message. Navigation and list suites click each link from a fresh page and fail on error
+pages, 4xx/5xx answers and "not found" text. Cases that need your app's own values (the minimum
+password length) are listed at the top of the suite to do by hand. `HEADLESS=1` runs the web
+suites without a window. Long values are written as code (`"a" * 1000`).
+
+Only run the security cases against apps you're allowed to test.
+
+**Save HTML…** writes the whole plan as one page; **Save CSV…** writes one row per case (UTF-8,
+steps numbered in one cell, values like `-1` protected from Excel's formula handling), which
+opens in Excel and imports into TestRail, Xray, Zephyr and similar tools; **Copy as Markdown**
+gives tables for a wiki or ticket.
+
+These are suggestions from patterns, not from understanding the app: review them, drop what
+doesn't apply, and fill in the app's own rules.
+
+### Testability: what the developers should change
+
+The **Testability** view grades every control of the same window for test automation, and
+writes a report the developers can act on. Each control's selector is built and checked
+against the copy of the window (17 controls in about 1.5 s; a few hundred take a few seconds).
+It starts with **In short**: the three changes that help most, in plain words.
+
+Each control gets a grade from the best selector the generator can build for it:
+
+| Grade | Means | Example |
+| :--- | :--- | :--- |
+| Good | A stable, unique id finds it, whatever the language, data or layout | `saveButton` |
+| Works, with caveats | Found by its text, text near it or its type: works, but that can change | *Button "Delete" inside the Pane containing "Order 1042"* |
+| Fragile | Only its position tells it apart, or nothing finds it | the 2nd of 3 identical "Action" buttons |
+
+It also flags, whatever the grade: ids that change between runs (React's `useId`, hashes,
+GUIDs), ids shared by several controls, and controls with **no accessible name**, which screen
+readers can't announce either. Each finding comes with **a fix in the app's own technology**:
+`AutomationProperties.AutomationId="ordersDeleteButton"` for WPF and WinUI, the control's `Name`
+for WinForms, a fixed `id` or `data-testid` for web pages, `setObjectName` for Qt, a unique
+control ID for Win32. Suggested ids come from the control's name, kind and container; rows that
+repeat get "add the row's key to the id", and identical controls "each need their own id".
+
+The report starts with a **score** (good controls count fully, those with caveats half), then
+**what to fix first** (e.g. *12 of 17 controls need a stable, unique id*; *5 are only found by
+their position*), the window with every control outlined in its grade's color and numbered,
+and each control to improve with how it's found now, why that's fragile and the fix.
+Selecting a control in the list outlines it in the app. **Save HTML…** writes one file,
+screenshot included; **Copy as text** gives Markdown for a ticket.
+
+- **Grouped, not one long list.** Controls with the same grade and problems, the same kind,
+  built the same way (same parent and grandparent, same page landmark) and found the same way
+  whatever their text are one entry with one fix: *25 links like “Cloud Data Inženjer”, “C++
+  Developer”…, in the main content*. The app lists the groups; selecting one shows its controls
+  below, and selecting a control outlines it in the app. The report numbers them as on the screenshot.
+- **Where each one is:** its nearest named section, or the page landmark (*in the navigation*,
+  *in the footer*, *in the main content*).
+- In a browser (Edge, Chrome, Firefox…), only the page is graded, not the browser's toolbar: the
+  page that holds the element pointed at, otherwise the visible one. (Browsers keep other tabs'
+  pages in the tree too, so a YouTube tab could otherwise end up in a job site's report.)
+  Chromium marks its pages with the AutomationId `RootWebArea`; Firefox shows each tab's page as a
+  plain Document (background tabs off-screen), and its toolbars and menus are never Documents.
+  Firefox also reports an element's whole CSS class list as its ClassName, so web class rules
+  (class lists and utility classes aren't identity) apply to it as they do to Chromium.
+- **Icon-font names** (a button "named" by one icon glyph) count as no name: screen readers
+  can't read them, and the text shown leaves the glyphs out.
+- Title bars and scrollbars are left out. In long lists, the first 3 items of a kind are graded
+  and the rest are counted (*"+40 like it"*).
+- Up to 5,000 elements are read and 400 controls graded per window; the report says when a
+  window had more.
+
 ## Console tool
 
 ```bash
@@ -309,6 +476,10 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | Rows found by their text (FlaUI, uiautomation, pywinauto) | The Delete button of "Order 1042", in a list of rows with no IDs and identical buttons, run against the fixture (3/3), then against a later version of it with a new row on top and the rows reordered: 3/3 still deleted Order 1042. The old position-based selector deleted Order 1043 there, without any error |
 | Web rows found by their text (Playwright JS/Python/C#, Selenium Python) | The Delete button of "Order 1042" in React-style rows (no ids, hashed classes), run against the page and against a later version of it (new row on top, rows reordered): 8/8 deleted Order 1042. A position-based locator deleted Order 1043 on the later version, without any error. The earlier 24 web cases still pass |
 | Web code without a debug port | Locators built from the accessibility tree for the 8 web fixture cases (including an unnamed clickable tile), with each script opening its own (headless) Edge: Playwright JS/Python/C# 24/24, Selenium Python 7/8. The miss is the Shadow DOM button: Selenium's XPath can't look inside Shadow DOM, and without a port the inspector can't tell it's there (Playwright handles it). A recorded web workflow (fill, delete order 1042, check): 4/4. Scripts that start the app with a port themselves, with a stand-in Electron launcher: 4/4; with "the app" already running without a port, the script stops after 4 s with the "quit it completely" message. The 24 debug-port cases still pass |
+| Test suites | Generated from the test fixtures and **run for real**. Web (the fixture page in headless Edge): the Playwright Python suite with pytest 9.2 and the Playwright Test suite (JavaScript, 1.56): login 14/14 plus the hidden-password check (the same-message check skipped without a real account), and a deliberately unsafe comment form (inserted with `innerHTML`) failed exactly on its two XSS cases: the `<img onerror>` alert, and the `<script>` in the page as HTML; 25 passed, 2 failed, as intended. Desktop (the WinForms fixture's sign-in panel): the uiautomation suite 15/15 with pytest, the FlaUI suite compiled with FlaUI 5.0 and xUnit 2.9 and passed 15/15, 15 screenshots each, through UI Automation only (no real mouse or keyboard). Compiling the FlaUI suite caught an ambiguous `Capture` (FlaUI's against .NET's regex class), fixed |
+| Test plan in Firefox | The open Firefox window, read in memory (only structure printed): every feature with a script got all 9 languages; Playwright opens `p.firefox.launch(headless=False)` at the page's https address read from Firefox. Templates for Firefox checked per language by unit tests. **Not run**: the Firefox scripts themselves (Playwright's Firefox build isn't installed here) |
+| Test plan | The web fixture in Edge: the sign-in form found as a login with ~60 cases, its Playwright script fills `#login-user`, reads the password from `UIINSPECTOR_SECRET_1` and clicks *Sign in*; the search box found as a search. Feature detection (login, sign-up, search, filters, paging, navigation) and field classification (English and Serbian labels) unit-tested on made-up pages; CSV checked for Excel safety. A real job site (helloworld.rs, throwaway Edge, nothing clicked): search, filters, two lists (job titles, companies), paging, navigation and the page, 80 cases in 1.5 s. In the GUI, driven through UI Automation: features listed, cases shown and filtered, script shown. **Not run here**: the generated scripts against a real site, and desktop apps other than the fixture |
+| Testability | The WinForms fixture: 17 controls graded in about 1.5 s, the expected grade for each case (unique id, panel-scoped duplicate, identical buttons, text-anchored rows, unnamed popup items, unnamed password box), fixes per technology and suggested ids checked by unit tests. The report viewed in a browser. The web fixture in Edge: only the page graded, the React search box flagged for its changing id with a `data-testid` fix. In the GUI, driven through UI Automation: a window picked in the tree, graded, summary and list filled, preview files deleted on exit. A real job site (helloworld.rs, in a throwaway Edge, nothing clicked): 77 controls in 1.1 s, 23 groups (header, job list and footer apart), Tailwind classes no longer used, icon-only buttons flagged. Choosing the page in a browser with a background tab: unit-tested with a made-up tree. **Not run here**: desktop apps other than the fixture |
 | Bug report | A report built from the recorded 6-step workflow, rendered in Edge: every screenshot shows the window as it was at that step (typed text, password dots, check box before and after). Each option checked by tests to add or remove its part. In the GUI, driven through UI Automation: title and severity reach the preview, unticking a part removes it, the preview folder is deleted on exit |
 | Clicks that close their popup | A popup with an OK button that closes it, next to another OK: checked against the snapshot taken at the click, its selector is "OK inside the Pane containing *Confirm delete?*", verified. Checked live after the click, the two can't be told apart |
 | Unnamed items in a popout | Like Discord's "View profile": an unnamed button, 6 levels deep in a menu that is one of 121 unnamed groups. Checked against a click snapshot: "Button #2 inside the Group containing *Profile menu*". Checked live (where the search stays near the element), it falls back to its position in the whole window |
@@ -339,13 +510,18 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 - **Quick clicks used to queue up.** Each click's hit-test, tree snapshot and screenshots ran one after another (~250–300 ms in Discord), so in a fast sequence the last click (closing a profile window) was resolved after the window had faded, landing on the backdrop. Recording with the window already open didn't show it, since that click was first in line. Chromium's positions were checked and were right.
 - **FlaUI's caching tree walker throws instead of returning null** when there's no previous sibling; that walk runs without a cache.
 - **A busy app can drop out of a single tree search**: under load, one selector check right after a recorded click found no window. The recorder retries once before falling back to an unverified selector.
-- **Window screenshots have two modes, each blind in one case.** The compositor's copy (`PW_RENDERFULLCONTENT`) is the only one with Chromium/WPF/WinUI content, but Windows never repaints the parts of a window that are off every monitor, so there it's old or empty. Asking the window to paint itself (plain `PrintWindow`) is current for classic windows but black for DirectX content. Captures use the first for windows fully on screen and the second otherwise, each falling back to the other when the result is blank.
+- **Window screenshots have two modes, each blind in one case.** The compositor's copy (`PW_RENDERFULLCONTENT`) is the only one with Chromium/WPF/WinUI content, but Windows never repaints the parts of a window that are off every monitor, so there it's old or empty. Asking the window to paint itself (plain `PrintWindow`) is current for classic windows but black for DirectX content. Captures use the first for windows fully on screen and the second otherwise, each falling back to the other when the result is blank or mostly black.
+- **A maximized window reaches past the screen.** Its outer rectangle includes invisible borders a few pixels beyond the monitor, so it looked "partly off-screen", got the paint-yourself capture, and a maximized Edge came out black with only the outlines. The on-screen check now uses the visible frame, and a mostly black capture also tries the other mode.
 - **Windows' own programs name the OS as their product** ("Microsoft® Windows® Operating System"), so reports use their file description ("Notepad") instead.
 - **Chromium doesn't always show UI Automation the same tree.** Depending on its accessibility mode it exposes plain `<div>`s (as groups, with their classes) or leaves them out, so rows of a list may exist as elements or their contents may sit side by side. Locators handle both: "the innermost element holding *Order 1042* and a Delete button" (`filter({ has })`), or "the first Delete button after the text *Order 1042*" (`following::`).
 - **Chromium only updates its accessibility tree while it renders**, and it pauses rendering for windows it thinks are hidden, so off-screen test windows need `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding`. Apps on screen aren't affected.
 - **Chromium's document element carries the page URL** as its UI Automation value, which is how scripts know where to go without a debug port.
 - **On web pages, "the div containing this text" isn't specific enough**: every outer wrapper `<div>` contains it too. The locator starts from the element showing exactly that text and goes up to its nearest container (`ancestor::div[1]`).
 - **Chromium can leave plain `<div>`s out of the UIA tree**, so the UIA parent of a label isn't necessarily its row.
+- **Web pages styled with Tailwind or Bootstrap have class names like `flex-1`, `p-4`, `d-flex`.** They describe one bit of styling and change with any redesign, so selectors no longer use them (helloworld.rs's job cards were found "inside Group .flex-1"). Real class names that merely start the same way (`text-editor`, `content-wrapper`) are still used.
+- **A busy PC can make one click's read take more than 3 s.** The recorder used to drop that click with a "did not respond" message (seen in a test run under load). It now tries once more with 10 s; only a frozen app loses the step.
+- **An off-screen test window can still take the keyboard.** A WinForms window activates itself when it opens, so text typed at the computer during a test run landed in it, unseen (a replay test once read "Oh What the app shows"). The fixture now opens without activating (`ShowWithoutActivation`).
+- **Parallel test classes opening the same page see each other's windows.** Two Edge fixtures with the same page title made the window step ambiguous, and a replay typed into the other class's Edge ("3 windows match; the first one was used"). Each fixture now sets its own title.
 - **React makes up element ids at runtime** (`useId`: `:r1a:` in React 18, `«r1»`, `_r_b3r_` in React 19; Discord's friend search box had `_r_b3r_`). They look like real ids, but change when the app restarts or redraws, so a replay a minute later found nothing. They're rejected now, along with MUI, Angular Material, Ember, jQuery UI, Ext JS and React Aria counters; the field is found by its label instead.
 - **Discord's popouts sit among 600+ unnamed groups**, and their items are several wrappers deep. Live searches only look 4 levels up and give up past 100 look-alikes (each check is a UIA round trip); a click snapshot is searched in memory, so it looks at every container. A nameless WinForms GroupBox borrows a nearby label's text as its name, which the fixture avoids with a blank title.
 - **The .NET Framework UI Automation client (`System.Windows.Automation`) doesn't see WinForms AutomationIds**, unlike UIA3 (FlaUI, uiautomation). Tools built on it see a different tree.

@@ -14,7 +14,8 @@ public static partial class WebApps
         var window = pathFromRoot[1];
         var name = content.ProcessName;
 
-        if (name.Equals("msedge", StringComparison.OrdinalIgnoreCase) || name.Equals("chrome", StringComparison.OrdinalIgnoreCase))
+        if (name.Equals("msedge", StringComparison.OrdinalIgnoreCase) || name.Equals("chrome", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("firefox", StringComparison.OrdinalIgnoreCase))
         {
             return new WebAppLaunch(WebAppKind.Browser, ExePath(content.ProcessId), name);
         }
@@ -44,10 +45,21 @@ public static partial class WebApps
     [System.Text.RegularExpressions.GeneratedRegex(@"^app-\d+(\.\d+)+$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)]
     private static partial System.Text.RegularExpressions.Regex SquirrelFolder();
 
-    /// <summary>The URL of the page the element is in (Chromium exposes it as the document's value). UIA worker thread.</summary>
+    /// <summary>
+    /// A web page in a UIA path: Chromium (Edge, Chrome, Electron, WebView2) reports it as a Document
+    /// with AutomationId "RootWebArea", Firefox as a Document of its own.
+    /// </summary>
+    public static bool IsWebPage(ElementInfo e) =>
+        e.ControlType == "Document" && (e is { FrameworkId: "Chrome", AutomationId: "RootWebArea" } || e.FrameworkId == "Gecko");
+
+    /// <summary>True for an element inside a web page that Playwright and Selenium can drive.</summary>
+    public static bool IsWebContent(IReadOnlyList<ElementInfo> pathFromRoot) =>
+        pathFromRoot.Count > 0 && pathFromRoot[^1].FrameworkId is "Chrome" or "Gecko" && pathFromRoot.Any(IsWebPage);
+
+    /// <summary>The URL of the page the element is in (both Chromium and Firefox expose it as the document's value). UIA worker thread.</summary>
     public static string? ReadPageUrl(IReadOnlyList<ElementInfo> pathFromRoot)
     {
-        var page = pathFromRoot.FirstOrDefault(e => e is { FrameworkId: "Chrome", ControlType: "Document", AutomationId: "RootWebArea" });
+        var page = pathFromRoot.FirstOrDefault(IsWebPage);
         if (page?.Ref is null) return null;
         try
         {

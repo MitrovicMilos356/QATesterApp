@@ -114,6 +114,20 @@ public static class WebCodeTemplates
 
     private static string Channel(WebResult app) => app.Browser == BrowserFlavor.Edge ? "msedge" : "chrome";
 
+    private static bool IsFirefox(WebResult app) => app.Browser == BrowserFlavor.Firefox;
+
+    private static string BrowserName(WebResult app) => app.Browser switch
+    {
+        BrowserFlavor.Edge => "Edge",
+        BrowserFlavor.Firefox => "Firefox",
+        _ => "Chrome",
+    };
+
+    // Playwright drives Chromium-based browsers that are installed (by channel), but Firefox only in its own build.
+    private static string PlaywrightInstallNote(WebResult app, string install, string downloadBrowser) => IsFirefox(app)
+        ? $"{install}, then once: {downloadBrowser}   (Playwright drives its own Firefox build, not the installed one)"
+        : $"{install}   (uses the installed app or browser; no browser download needed)";
+
     private static string ImageName(WebResult app) => app.Launch?.ImageName ?? $"{AppName(app)}.exe";
 
     private static IReadOnlyList<string> StartArguments(WebResult app) =>
@@ -149,7 +163,7 @@ public static class WebCodeTemplates
                 sb.AppendLine($"{comment} Attaches to {AppName(app)}, which runs with --remote-debugging-port={app.Port}.");
                 break;
             case Reach.OpenBrowser:
-                sb.AppendLine($"{comment} Opens its own {(app.Browser == BrowserFlavor.Edge ? "Edge" : "Chrome")} window and goes to the page; your browser isn't touched.");
+                sb.AppendLine($"{comment} Opens its own {BrowserName(app)} window and goes to the page; your browser isn't touched.");
                 break;
             default:
                 sb.AppendLine($"{comment} Starts {AppName(app)} with a debugging port, then attaches. Close {AppName(app)} completely first:");
@@ -164,9 +178,9 @@ public static class WebCodeTemplates
     private static string PlaywrightJs(WebResult app, IReadOnlyList<WebStep> steps, IReadOnlyList<string> header)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("// npm i playwright-core   (uses the installed app or browser; no browser download needed)");
+        sb.AppendLine("// " + PlaywrightInstallNote(app, IsFirefox(app) ? "npm i playwright" : "npm i playwright-core", "npx playwright install firefox"));
         Header(sb, "//", app, header);
-        sb.AppendLine("const { chromium } = require('playwright-core');");
+        sb.AppendLine(IsFirefox(app) ? "const { firefox } = require('playwright');" : "const { chromium } = require('playwright-core');");
         var reach = HowToReach(app);
         if (reach == Reach.StartApp) sb.AppendLine("const { spawn } = require('child_process');");
         sb.AppendLine();
@@ -174,7 +188,7 @@ public static class WebCodeTemplates
         switch (reach)
         {
             case Reach.OpenBrowser:
-                sb.AppendLine($"  const browser = await chromium.launch({{ channel: {Js(Channel(app))}, headless: false }});");
+                sb.AppendLine(IsFirefox(app) ? "  const browser = await firefox.launch({ headless: false });" : $"  const browser = await chromium.launch({{ channel: {Js(Channel(app))}, headless: false }});");
                 sb.AppendLine("  const page = await browser.newPage();");
                 sb.AppendLine($"  await page.goto({Js(app.PageUrl)});");
                 break;
@@ -257,7 +271,7 @@ public static class WebCodeTemplates
     private static string PlaywrightPy(WebResult app, IReadOnlyList<WebStep> steps, IReadOnlyList<string> header)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("# pip install playwright   (uses the installed app or browser; no browser download needed)");
+        sb.AppendLine("# " + PlaywrightInstallNote(app, "pip install playwright", "playwright install firefox"));
         Header(sb, "#", app, header);
         var reach = HowToReach(app);
         sb.AppendLine("import os");
@@ -305,7 +319,7 @@ public static class WebCodeTemplates
         switch (reach)
         {
             case Reach.OpenBrowser:
-                sb.AppendLine($"    browser = p.chromium.launch(channel={Py(Channel(app))}, headless=False)");
+                sb.AppendLine(IsFirefox(app) ? "    browser = p.firefox.launch(headless=False)" : $"    browser = p.chromium.launch(channel={Py(Channel(app))}, headless=False)");
                 sb.AppendLine("    page = browser.new_page()");
                 sb.AppendLine($"    page.goto({Py(app.PageUrl)})");
                 break;
@@ -344,7 +358,7 @@ public static class WebCodeTemplates
     private static string PlaywrightCs(WebResult app, IReadOnlyList<WebStep> steps, IReadOnlyList<string> header)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("// NuGet: Microsoft.Playwright   (uses the installed app or browser; no browser download needed)");
+        sb.AppendLine("// " + PlaywrightInstallNote(app, "NuGet: Microsoft.Playwright", "pwsh bin/Debug/net8.0/playwright.ps1 install firefox"));
         Header(sb, "//", app, header);
         var reach = HowToReach(app);
         sb.AppendLine("using Microsoft.Playwright;");
@@ -353,7 +367,7 @@ public static class WebCodeTemplates
         switch (reach)
         {
             case Reach.OpenBrowser:
-                sb.AppendLine($"var browser = await playwright.Chromium.LaunchAsync(new() {{ Channel = {Cs(Channel(app))}, Headless = false }});");
+                sb.AppendLine(IsFirefox(app) ? "var browser = await playwright.Firefox.LaunchAsync(new() { Headless = false });" : $"var browser = await playwright.Chromium.LaunchAsync(new() {{ Channel = {Cs(Channel(app))}, Headless = false }});");
                 sb.AppendLine("var page = await browser.NewPageAsync();");
                 sb.AppendLine($"await page.GotoAsync({Cs(app.PageUrl)});");
                 break;
@@ -500,6 +514,13 @@ public static class WebCodeTemplates
 
     private static string Quote(string value, PwFlavor f) => f switch { PwFlavor.Js => Js(value), PwFlavor.Py => Py(value), _ => Cs(value) };
 
+    /// <summary>The Playwright locator for <paramref name="s"/>, starting from <c>page</c>, in Python or JavaScript (for test suites).</summary>
+    internal static string PlaywrightLocator(WebSelector s, bool python) => PwChain(s, "page", python ? PwFlavor.Py : PwFlavor.Js);
+
+    internal static string PyString(string value) => Py(value);
+
+    internal static string JsString(string value) => Js(value);
+
     private static string PwChain(WebSelector s, string start, PwFlavor f)
     {
         var sb = new StringBuilder(start);
@@ -618,8 +639,8 @@ public static class WebCodeTemplates
             PythonIsRunning(sb);
         }
 
-        var options = edge ? "EdgeOptions" : "ChromeOptions";
-        var driver = edge ? "Edge" : "Chrome";
+        var options = edge ? "EdgeOptions" : IsFirefox(app) ? "FirefoxOptions" : "ChromeOptions";
+        var driver = edge ? "Edge" : IsFirefox(app) ? "Firefox" : "Chrome";
         switch (reach)
         {
             case Reach.OpenBrowser:
@@ -722,9 +743,9 @@ public static class WebCodeTemplates
     {
         var edge = app.Browser == BrowserFlavor.Edge;
         var reach = HowToReach(app);
-        var options = edge ? "EdgeOptions" : "ChromeOptions";
-        var driverType = edge ? "EdgeDriver" : "ChromeDriver";
-        var package = edge ? "edge" : "chrome";
+        var options = edge ? "EdgeOptions" : IsFirefox(app) ? "FirefoxOptions" : "ChromeOptions";
+        var driverType = edge ? "EdgeDriver" : IsFirefox(app) ? "FirefoxDriver" : "ChromeDriver";
+        var package = edge ? "edge" : IsFirefox(app) ? "firefox" : "chrome";
         var sb = new StringBuilder();
         sb.AppendLine("// Maven: org.seleniumhq.selenium:selenium-java (4.x, Java 11+; Selenium Manager downloads the driver)");
         Header(sb, "//", app, header);

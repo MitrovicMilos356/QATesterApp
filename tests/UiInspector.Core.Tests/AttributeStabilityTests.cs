@@ -65,6 +65,8 @@ public class AttributeStabilityTests
     [InlineData("mat-input-0")]
     [InlineData("ember412")]
     [InlineData("ui-id-3")]
+    [InlineData("s2id_autogen7")]          // Select2 (helloworld.rs filter inputs)
+    [InlineData("select2-city-result-4x7k-12")]
     [InlineData("")]
     public void UnusableAutomationIds(string id)
     {
@@ -97,6 +99,19 @@ public class AttributeStabilityTests
     [InlineData("channel__972a0 dm__972a0 container_e45859", "Chrome")]  // Discord, HTML class list
     [InlineData("content_d125d2", "Chrome")]
     [InlineData("appMount__51fd7", "Chrome")]
+    [InlineData("flex-1", "Chrome")]        // Tailwind (helloworld.rs job cards)
+    [InlineData("p-4", "Chrome")]
+    [InlineData("md:flex", "Chrome")]
+    [InlineData("w-full", "Chrome")]
+    [InlineData("text-sm", "Chrome")]
+    [InlineData("d-flex", "Chrome")]        // Bootstrap
+    [InlineData("col-md-6", "Chrome")]
+    [InlineData("hidden", "Chrome")]
+    [InlineData("bg-gray-100", "Chrome")]
+    [InlineData("hover:bg-blue-500", "Chrome")]
+    [InlineData("max-w-[960px]", "Chrome")]
+    [InlineData("job-card card shadow", "Gecko")]   // Firefox reports the whole HTML class list
+    [InlineData("flex-1", "Gecko")]
     public void UnusableClassNames(string className, string framework)
     {
         Assert.Equal(Stability.Unusable, AttributeStability.AnalyzeClassName(className, framework).Stability);
@@ -107,6 +122,12 @@ public class AttributeStabilityTests
     [InlineData("Edit", "Win32")]
     [InlineData("Chrome_WidgetWin_1", "Win32")]
     [InlineData("ApplicationFrameWindow", "Win32")]
+    [InlineData("job-card", "Chrome")]
+    [InlineData("text-editor", "Chrome")]       // starts like a utility class, but isn't one
+    [InlineData("content-wrapper", "Chrome")]
+    [InlineData("btn-primary", "Chrome")]
+    [InlineData("navbar", "Chrome")]
+    [InlineData("search-results", "Chrome")]
     public void StableClassNames(string className, string framework)
     {
         Assert.Equal(Stability.Stable, AttributeStability.AnalyzeClassName(className, framework).Stability);

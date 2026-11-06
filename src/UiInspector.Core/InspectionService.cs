@@ -67,7 +67,7 @@ public sealed class InspectionService(UiaWorker worker, ElementInspector inspect
         IReadOnlyList<ElementInfo> pathFromRoot, CancellationToken cancellationToken = default, bool includeWeb = true, IElementTree? snapshot = null)
     {
         var result = await worker.RunAsync(a => _selectorGenerator.Generate(a, pathFromRoot, snapshot), cancellationToken, SelectorTimeout);
-        if (!includeWeb || pathFromRoot[^1].FrameworkId != "Chrome") return result;
+        if (!includeWeb || !WebApps.IsWebContent(pathFromRoot)) return result;
         return result with { Web = await GenerateWebAsync(pathFromRoot, result, cancellationToken, snapshot) };
     }
 
@@ -81,7 +81,8 @@ public sealed class InspectionService(UiaWorker worker, ElementInspector inspect
         var launch = WebApps.Describe(pathFromRoot);
         string? devToolsProblem = null;
 
-        var port = CdpPort ?? TryFindPort(pathFromRoot[^1].ProcessId);
+        // Firefox has no Chromium debug port; its locators always come from the accessibility tree.
+        var port = pathFromRoot[^1].FrameworkId != "Chrome" ? null : CdpPort ?? TryFindPort(pathFromRoot[^1].ProcessId);
         if (port is not null)
         {
             // The web side talks to the page over CDP, not UIA, so it runs off the UIA worker.
@@ -122,6 +123,26 @@ public sealed class InspectionService(UiaWorker worker, ElementInspector inspect
             return null;
         }
     }
+
+    /// <summary>
+    /// Where the element is now, scrolled into view first if it's out of sight (a field further down
+    /// a page): for outlining it. Null if it's gone (the page changed or the window closed).
+    /// </summary>
+    public Task<System.Drawing.Rectangle?> RevealAsync(ElementInfo element, CancellationToken cancellationToken = default) =>
+        worker.RunAsync<System.Drawing.Rectangle?>(_ =>
+        {
+            if (element.Ref is null) return null;
+            try
+            {
+                var live = element.Ref.Element;
+                if (live.Properties.IsOffscreen.ValueOrDefault) live.Patterns.ScrollItem.PatternOrDefault?.ScrollIntoView();
+                return live.Properties.BoundingRectangle.TryGetValue(out var bounds) && bounds is { Width: > 0, Height: > 0 } ? bounds : null;
+            }
+            catch (Exception ex) when (ex is System.Runtime.InteropServices.COMException or FlaUI.Core.Exceptions.FlaUIException)
+            {
+                return null;
+            }
+        }, cancellationToken);
 
     public Task<ElementInfo> GetDesktopAsync(CancellationToken cancellationToken = default) =>
         worker.RunAsync(inspector.ReadDesktop, cancellationToken);

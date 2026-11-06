@@ -528,6 +528,283 @@
                 </DockPanel>
             </Grid>
         </TabItem>
+
+        <TabItem Header="Test plan" AutomationProperties.AutomationId="TestabilityTab" DataContext="{Binding Testability}">
+            <DockPanel Margin="4,6,4,4">
+                <StackPanel DockPanel.Dock="Top">
+                    <WrapPanel>
+                        <Button Style="{StaticResource ToolButton}" Content="{Binding AnalyzeButtonText}" Command="{Binding AnalyzeUnderCursorCommand}"
+                                AutomationProperties.AutomationId="AnalyzeUnderCursorButton"
+                                ToolTip="Click, then put the cursor on the app's window within 3 seconds"/>
+                        <Button Style="{StaticResource ToolButton}" Content="Analyze picked element's window" Command="{Binding AnalyzeSelectedCommand}"
+                                AutomationProperties.AutomationId="AnalyzeSelectedButton"
+                                ToolTip="The window of the element selected in the Inspector tab"/>
+                    </WrapPanel>
+                    <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}"
+                               AutomationProperties.AutomationId="TestabilityStatus"/>
+                </StackPanel>
+
+                <TabControl Margin="0,8,0,0" AutomationProperties.AutomationId="AnalysisTabs">
+                <TabItem Header="What to test" AutomationProperties.AutomationId="TestPlanTab">
+                    <Grid Margin="4,6,4,4">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="320" MinWidth="240"/>
+                            <ColumnDefinition Width="6"/>
+                            <ColumnDefinition Width="*" MinWidth="400"/>
+                        </Grid.ColumnDefinitions>
+
+                        <DockPanel Grid.Column="0">
+                            <TextBlock DockPanel.Dock="Top" Text="{Binding PlanSummary}" TextWrapping="Wrap" Margin="0,0,0,6"
+                                       AutomationProperties.AutomationId="PlanSummary"/>
+                            <WrapPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" Visibility="{Binding HasReport, Converter={StaticResource BoolToVisibility}}">
+                                <Button Style="{StaticResource ToolButton}" Content="Save HTML…" Command="{Binding SavePlanHtmlCommand}"
+                                        AutomationProperties.AutomationId="SavePlanHtmlButton" AutomationProperties.Name="Save test plan as HTML"
+                                        ToolTip="The whole test plan as one page, to read or share"/>
+                                <Button Style="{StaticResource ToolButton}" Content="Save CSV…" Command="{Binding SavePlanCsvCommand}"
+                                        AutomationProperties.AutomationId="SavePlanCsvButton" AutomationProperties.Name="Save test plan as CSV"
+                                        ToolTip="One row per test case: opens in Excel, imports into TestRail, Xray, Zephyr and similar tools"/>
+                                <Button Style="{StaticResource ToolButton}" Content="Copy as Markdown" Command="{Binding CopyPlanMarkdownCommand}"
+                                        AutomationProperties.AutomationId="CopyPlanButton"
+                                        ToolTip="Tables for a wiki or a ticket"/>
+                            </WrapPanel>
+                            <ListBox ItemsSource="{Binding Features}" SelectedItem="{Binding SelectedFeature}"
+                                     BorderBrush="{StaticResource PanelBorderBrush}" HorizontalContentAlignment="Stretch"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                     AutomationProperties.AutomationId="Features" AutomationProperties.Name="Features to test">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate DataType="{x:Type local:FeatureRow}">
+                                        <StackPanel Margin="2,3">
+                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0" Foreground="{StaticResource MutedBrush}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                        </DockPanel>
+
+                        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                        <Grid Grid.Column="2" Visibility="{Binding HasFeature, Converter={StaticResource BoolToVisibility}}">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="3*" MinHeight="120"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*" MinHeight="90"/>
+                            </Grid.RowDefinitions>
+                            <TextBlock Grid.Row="0" Text="{Binding FeatureHeader}" FontWeight="SemiBold" FontSize="15" TextWrapping="Wrap"/>
+                            <TextBlock Grid.Row="1" Text="{Binding FeatureWarnings}" TextWrapping="Wrap" Foreground="#B45309" Margin="0,4,0,0">
+                                <TextBlock.Style>
+                                    <Style TargetType="TextBlock">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding FeatureWarnings}" Value="">
+                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                            <DockPanel Grid.Row="2" Margin="0,8,0,6">
+                                <TextBlock Text="Show" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox ItemsSource="{Binding CaseFilters}" SelectedItem="{Binding SelectedCaseFilter}" MinWidth="170"
+                                          AutomationProperties.AutomationId="CaseFilter" AutomationProperties.Name="Show test cases"/>
+                                <TextBlock Text="{Binding CaseCountText}" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{StaticResource MutedBrush}"/>
+                            </DockPanel>
+                            <DataGrid Grid.Row="3" ItemsSource="{Binding Cases}" SelectedItem="{Binding SelectedCase}" AutoGenerateColumns="False" IsReadOnly="True"
+                                      HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E5E7EB"
+                                      RowDetailsVisibilityMode="VisibleWhenSelected" SelectionMode="Single" ClipboardCopyMode="None"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" CanUserAddRows="False"
+                                      PreviewMouseRightButtonDown="TestCases_PreviewMouseRightButtonDown"
+                                      AutomationProperties.AutomationId="TestCases" AutomationProperties.Name="Test cases">
+                                <DataGrid.InputBindings>
+                                    <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopyValueCommand}"/>
+                                </DataGrid.InputBindings>
+                                <DataGrid.ContextMenu>
+                                    <ContextMenu>
+                                        <MenuItem Header="Copy value" Command="{Binding CopyValueCommand}" InputGestureText="Ctrl+C"/>
+                                        <MenuItem Header="Copy steps" Command="{Binding CopyStepsCommand}"/>
+                                        <MenuItem Header="Copy the whole case" Command="{Binding CopyCaseCommand}"/>
+                                    </ContextMenu>
+                                </DataGrid.ContextMenu>
+                                <DataGrid.Resources>
+                                    <Style x:Key="Wrap" TargetType="TextBlock">
+                                        <Setter Property="TextWrapping" Value="Wrap"/>
+                                        <Setter Property="Margin" Value="2,3"/>
+                                    </Style>
+                                </DataGrid.Resources>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="Auto" ElementStyle="{StaticResource Wrap}"/>
+                                    <DataGridTextColumn Header="Test" Binding="{Binding Title}" Width="2*" ElementStyle="{StaticResource Wrap}"/>
+                                    <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="Auto" ElementStyle="{StaticResource Wrap}"/>
+                                    <DataGridTextColumn Header="Priority" Binding="{Binding Priority}" Width="Auto" ElementStyle="{StaticResource Wrap}"/>
+                                    <DataGridTextColumn Header="Data" Binding="{Binding Data}" Width="1.5*" FontFamily="Consolas" ElementStyle="{StaticResource Wrap}"/>
+                                    <DataGridTextColumn Header="Expected" Binding="{Binding Expected}" Width="2*" ElementStyle="{StaticResource Wrap}"/>
+                                </DataGrid.Columns>
+                                <DataGrid.RowDetailsTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="24,2,8,10">
+                                            <TextBlock Text="{Binding StepsText}" TextWrapping="Wrap" Foreground="#374151"/>
+                                            <StackPanel Margin="0,8,0,0" Visibility="{Binding HasData, Converter={StaticResource BoolToVisibility}}">
+                                                <TextBlock Text="{Binding DataHint}" FontSize="12" Foreground="{StaticResource MutedBrush}"/>
+                                                <DockPanel Margin="0,2,0,0">
+                                                    <Button DockPanel.Dock="Right" Padding="8,2" Margin="6,0,0,0" Content="Copy value"
+                                                            Command="{Binding DataContext.CopyValueCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                            AutomationProperties.AutomationId="CopyValueButton"/>
+                                                    <TextBox Text="{Binding ShownValue, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" TextWrapping="Wrap"
+                                                             MaxHeight="90" VerticalScrollBarVisibility="Auto" Padding="3"
+                                                             AutomationProperties.AutomationId="CaseValue" AutomationProperties.Name="Value to type"/>
+                                                </DockPanel>
+                                            </StackPanel>
+                                            <Border Margin="0,8,0,0" Padding="8,5" Background="#FEF2F2" BorderBrush="#DC2626" BorderThickness="3,0,0,0"
+                                                    Visibility="{Binding HasRisk, Converter={StaticResource BoolToVisibility}}">
+                                                <TextBlock TextWrapping="Wrap" AutomationProperties.AutomationId="CaseRisk">
+                                                    <Run Text="If it fails: " FontWeight="SemiBold"/><Run Text="{Binding IfItFails, Mode=OneWay}"/>
+                                                </TextBlock>
+                                            </Border>
+                                            <WrapPanel Margin="0,8,0,0">
+                                                <Button Padding="8,2" Margin="0,0,6,0" Content="Copy steps"
+                                                        Command="{Binding DataContext.CopyStepsCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                                                <Button Padding="8,2" Content="Copy the whole case"
+                                                        Command="{Binding DataContext.CopyCaseCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                                            </WrapPanel>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </DataGrid.RowDetailsTemplate>
+                            </DataGrid>
+                            <DockPanel Grid.Row="4" Margin="0,8,0,6">
+                                <Button DockPanel.Dock="Right" Padding="10,3" Content="Save…" Command="{Binding SavePlanScriptCommand}"
+                                        AutomationProperties.AutomationId="SavePlanScriptButton" AutomationProperties.Name="Save script"/>
+                                <Button DockPanel.Dock="Right" Padding="10,3" Margin="0,0,6,0" Content="Copy script" Command="{Binding CopyPlanScriptCommand}"
+                                        AutomationProperties.AutomationId="CopyPlanScriptButton"/>
+                                <TextBlock Text="Scripts" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,8,0"
+                                           ToolTip="Test suites run every case with its data and check for XSS, crash text and errors; main-flow scripts are a starting point"/>
+                                <ComboBox ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}" DisplayMemberPath="Title" Margin="0,0,8,0"
+                                          AutomationProperties.AutomationId="PlanScriptLanguage" AutomationProperties.Name="Script language"/>
+                            </DockPanel>
+                            <TextBox Grid.Row="5" Text="{Binding ScriptText, Mode=OneWay}" IsReadOnly="True"
+                                     FontFamily="Consolas" FontSize="12" Padding="6"
+                                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
+                                     AutomationProperties.AutomationId="PlanScript" AutomationProperties.Name="Script for the main flow"/>
+                        </Grid>
+                    </Grid>
+                </TabItem>
+
+                <TabItem Header="Testability" AutomationProperties.AutomationId="TestabilityDetailsTab">
+            <Grid Margin="4,6,4,4">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="400" MinWidth="300"/>
+                    <ColumnDefinition Width="6"/>
+                    <ColumnDefinition Width="*" MinWidth="300"/>
+                </Grid.ColumnDefinitions>
+
+                <DockPanel Grid.Column="0">
+                    <StackPanel DockPanel.Dock="Top">
+                        <StackPanel Margin="0,4,0,0" Visibility="{Binding HasReport, Converter={StaticResource BoolToVisibility}}">
+                            <TextBlock>
+                                <Run Text="{Binding ScoreText, Mode=OneWay}" FontSize="24" FontWeight="Bold"/>
+                                <Run Text="  "/><Run Text="{Binding CountsText, Mode=OneWay}" Foreground="{StaticResource MutedBrush}"/>
+                            </TextBlock>
+                            <TextBlock Text="{Binding SummaryText}" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.AutomationId="TestabilitySummary"/>
+                            <DockPanel Margin="0,10,0,4">
+                                <TextBlock Text="Show" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox ItemsSource="{Binding Filters}" SelectedItem="{Binding SelectedFilter}"
+                                          AutomationProperties.AutomationId="FindingsFilter" AutomationProperties.Name="Show"/>
+                            </DockPanel>
+                        </StackPanel>
+                    </StackPanel>
+
+                    <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" Visibility="{Binding HasReport, Converter={StaticResource BoolToVisibility}}">
+                        <WrapPanel>
+                            <Button Style="{StaticResource ToolButton}" Content="Save HTML…" Command="{Binding SaveHtmlCommand}"
+                                    AutomationProperties.AutomationId="SaveTestabilityButton" AutomationProperties.Name="Save testability report"
+                                    ToolTip="One file with everything, the numbered screenshot included: ready to send to the developers"/>
+                            <Button Style="{StaticResource ToolButton}" Content="Copy as text" Command="{Binding CopyTextCommand}"
+                                    AutomationProperties.AutomationId="CopyTestabilityButton"
+                                    ToolTip="Markdown text without the screenshot, for a ticket or a chat"/>
+                        </WrapPanel>
+                    </StackPanel>
+
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="2*" MinHeight="100"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*" MinHeight="70"/>
+                        </Grid.RowDefinitions>
+                    <ListBox Grid.Row="0" ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}"
+                             BorderBrush="{StaticResource PanelBorderBrush}" HorizontalContentAlignment="Stretch"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             AutomationProperties.AutomationId="Findings" AutomationProperties.Name="Problems, grouped">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type local:GroupRow}">
+                                <StackPanel Margin="2,3">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Tone}" Value="ok">
+                                                        <Setter Property="Foreground" Value="#15803D"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Tone}" Value="warn">
+                                                        <Setter Property="Foreground" Value="#B45309"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding Tone}" Value="bad">
+                                                        <Setter Property="Foreground" Value="#B91C1C"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                    <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0" Foreground="{StaticResource MutedBrush}"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+
+                    <TextBlock Grid.Row="1" Text="{Binding MembersHeader}" FontWeight="SemiBold" Margin="0,8,0,4"
+                               Visibility="{Binding HasMembers, Converter={StaticResource BoolToVisibility}}"/>
+                    <ListBox Grid.Row="2" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}"
+                             Visibility="{Binding HasMembers, Converter={StaticResource BoolToVisibility}}"
+                             BorderBrush="{StaticResource PanelBorderBrush}" HorizontalContentAlignment="Stretch"
+                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             AutomationProperties.AutomationId="GroupMembers" AutomationProperties.Name="Controls in the group">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate DataType="{x:Type local:FindingRow}">
+                                <StackPanel Margin="2,2">
+                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap"/>
+                                    <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,0,0,0" Foreground="{StaticResource MutedBrush}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding Detail}" Value="">
+                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                    </Grid>
+                </DockPanel>
+
+                <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                <DockPanel Grid.Column="2">
+                    <TextBlock DockPanel.Dock="Top" Margin="2,0,0,6">
+                        <Run Text="Report" FontWeight="SemiBold"/><Run Text="  exactly what Save HTML writes" Foreground="{StaticResource MutedBrush}"/>
+                    </TextBlock>
+                    <Border BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1">
+                        <WebBrowser x:Name="TestabilityBrowser" AutomationProperties.AutomationId="TestabilityPreview" AutomationProperties.Name="Testability report"/>
+                    </Border>
+                </DockPanel>
+            </Grid>
+                </TabItem>
+                </TabControl>
+            </DockPanel>
+        </TabItem>
         </TabControl>
     </DockPanel>
 </Window>

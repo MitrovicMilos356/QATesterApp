@@ -39,6 +39,21 @@
 <!-- A labelled input: role textbox, name from the label. -->
 <label for="email-input">Email</label> <input id="email-input" type="text" oninput="report('email: ' + this.value)">
 
+<!-- A sign-in form, for the test plan's login detection. -->
+<form aria-label="Sign in" onsubmit="report('signed in as ' + this.elements[0].value); return false;">
+  <label for="login-user">Login email</label> <input id="login-user" type="email">
+  <label for="login-password">Password</label> <input id="login-password" type="password">
+  <button type="submit">Sign in</button>
+</form>
+
+<!-- DELIBERATELY UNSAFE, for testing the test suites' XSS checks only: the comment is inserted
+     with innerHTML, so <img src=x onerror=...> runs (and <script> lands in the page as HTML). -->
+<form aria-label="Comment" onsubmit="document.getElementById('comments').innerHTML += '<p>' + this.elements[0].value + '</p>'; return false;">
+  <label for="comment-text">Comment</label> <input id="comment-text" type="text">
+  <button type="submit">Post comment</button>
+</form>
+<div id="comments"></div>
+
 <!-- A React search box (like Discord's friend search): its id comes from useId and changes every run. -->
 <input id="_r_b3r_" type="text" aria-label="Search friends" placeholder="Search" oninput="report('search: ' + this.value)">
 
@@ -60,6 +75,10 @@
 
 <script>
   function report(text) { document.getElementById('status').textContent = text; }
+  // Test classes that run at the same time each open their own copy under its own title (?title=…),
+  // so a selector can't land in another class's window.
+  const ownTitle = new URLSearchParams(location.search).get('title');
+  if (ownTitle) document.title = ownTitle;
   const numbers = location.search.includes('reordered') ? [1040, 1043, 1042, 1041] : [1041, 1042, 1043];
   const list = document.getElementById('orders-placeholder');
   list.removeAttribute('id');
