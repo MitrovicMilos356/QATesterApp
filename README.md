@@ -163,6 +163,32 @@ How it works, and what it doesn't capture:
   (including generated ones) is ignored.
 - Live pick (Ctrl-hover) pauses while recording, so shortcuts like Ctrl+S don't pick elements.
 
+### Replay: check a recording before using its script
+
+**▶ Play** in the Recorder tab plays the steps back in the app, the way the FlaUI script would:
+each step's selector is searched from the desktop (waiting up to 10 s), then the same action is
+performed, a UIA pattern call (Invoke, Toggle, SetValue…) where the element has one and the real
+mouse or keyboard only where the script uses them too. Each step is highlighted as it runs and
+gets a line under it: *Passed*, *FAILED* with the reason, or *Skipped* (no selector, as in the
+scripts). The replay stops at the first failure, like the scripts do.
+
+- Failures say **which part of the selector found nothing** (*Nothing matches Pane containing
+  Text "Order 1042" in the window*), that the window isn't open, that a position no longer exists
+  (*Only 2 elements match…; the step wants #3*), or what a check got instead (*Expected "Saved",
+  but it shows "Error"*). When several elements match, the first is used and the step says so.
+- **Report this failure** opens the Bug report tab with the steps up to the failed one, the
+  window as it was at the failure (with the element outlined, if it was found), and the title,
+  expected and actual result filled in where they were still empty. *Use all recorded steps* goes
+  back to the whole recording.
+- **Text steps are read back.** Some fields accept "set your text" from UI Automation without
+  taking it (rich editors) or refuse it; replay then types the text with the keyboard and marks
+  the step *Passed, with a warning*, since the scripts set it directly there and may fail. If
+  the field still doesn't show the text, the step fails with what it shows. A step whose text
+  couldn't be read while recording fails with that reason instead of typing nothing.
+- Passwords aren't in the recording, so Play asks for each one; it's only kept for that replay.
+- **■ Stop replay** or Ctrl+Shift+F8 stops it. A short pause before each step makes it easy to
+  follow; otherwise it runs at the script's pace.
+
 ### Bug report: from a recording to a report a developer can act on
 
 Record the steps that lead to the bug, then open the **Bug report** tab. Fill in the title,
@@ -287,6 +313,7 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | Clicks that close their popup | A popup with an OK button that closes it, next to another OK: checked against the snapshot taken at the click, its selector is "OK inside the Pane containing *Confirm delete?*", verified. Checked live after the click, the two can't be told apart |
 | Unnamed items in a popout | Like Discord's "View profile": an unnamed button, 6 levels deep in a menu that is one of 121 unnamed groups. Checked against a click snapshot: "Button #2 inside the Group containing *Profile menu*". Checked live (where the search stays near the element), it falls back to its position in the whole window |
 | Discord (real app, no setup) | A recorded 4-step Playwright script started Discord with a debug port through `Update.exe` and attached. Steps 1–2 ran; step 3 relied on a text that only appears while hovering, which led to the click snapshot above |
+| Replay | Against its own fixture window, with pattern actions only (text, button, anchored duplicate button, text check): all passed and left the app in the recorded state. A failing value check stopped the replay with "Expected …, but it shows …" and a screenshot, the next step left unplayed. A renamed button and a closed window got "Nothing matches Button [AutomationId = …] in the window" and "isn't open". Text typed into a web field in Edge (no debug port): the page's own input handler saw it. In the GUI: the Play button shows and is off until there are steps. **Not run in the GUI**: a whole record → play → report-the-failure round, since recording needs real input; mouse and keyboard steps are not replayed in tests either |
 | Recorded scripts (Appium) | Generated and unit-tested, **not run** (no Appium server) |
 | Recorder with real mouse and keyboard | **Not run here**: the hook was installed and removed in a test, but recording real input would have captured the person using this computer. Try it on your apps |
 
@@ -319,6 +346,7 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 - **Chromium's document element carries the page URL** as its UI Automation value, which is how scripts know where to go without a debug port.
 - **On web pages, "the div containing this text" isn't specific enough**: every outer wrapper `<div>` contains it too. The locator starts from the element showing exactly that text and goes up to its nearest container (`ancestor::div[1]`).
 - **Chromium can leave plain `<div>`s out of the UIA tree**, so the UIA parent of a label isn't necessarily its row.
+- **React makes up element ids at runtime** (`useId`: `:r1a:` in React 18, `«r1»`, `_r_b3r_` in React 19; Discord's friend search box had `_r_b3r_`). They look like real ids, but change when the app restarts or redraws, so a replay a minute later found nothing. They're rejected now, along with MUI, Angular Material, Ember, jQuery UI, Ext JS and React Aria counters; the field is found by its label instead.
 - **Discord's popouts sit among 600+ unnamed groups**, and their items are several wrappers deep. Live searches only look 4 levels up and give up past 100 look-alikes (each check is a UIA round trip); a click snapshot is searched in memory, so it looks at every container. A nameless WinForms GroupBox borrows a nearby label's text as its name, which the fixture avoids with a blank title.
 - **The .NET Framework UI Automation client (`System.Windows.Automation`) doesn't see WinForms AutomationIds**, unlike UIA3 (FlaUI, uiautomation). Tools built on it see a different tree.
 - Mixed-DPI monitors haven't been tested yet (the development machine has one 100 % monitor).

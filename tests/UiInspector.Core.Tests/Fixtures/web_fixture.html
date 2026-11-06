@@ -39,6 +39,9 @@
 <!-- A labelled input: role textbox, name from the label. -->
 <label for="email-input">Email</label> <input id="email-input" type="text" oninput="report('email: ' + this.value)">
 
+<!-- A React search box (like Discord's friend search): its id comes from useId and changes every run. -->
+<input id="_r_b3r_" type="text" aria-label="Search friends" placeholder="Search" oninput="report('search: ' + this.value)">
+
 <!-- Same-origin iframe. -->
 <iframe id="payment-frame" title="Payment" srcdoc="<button onclick=&quot;parent.report('pay clicked')&quot;>Pay now</button>"></iframe>
 

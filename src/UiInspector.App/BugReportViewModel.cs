@@ -38,6 +38,7 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
 
     private readonly Recorder _recorder;
     private readonly DispatcherTimer _previewTimer;
+    private IReadOnlyList<RecordedStep>? _replaySteps; // the steps up to a failed replay step, while the report is about that
     private readonly string _previewFolder = Path.Combine(Path.GetTempPath(), $"UiInspector-preview-{Environment.ProcessId}");
     private int _previewNumber;
     private bool _rebuilding;
@@ -46,7 +47,7 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
     {
         _recorder = recorder;
         _previewTimer = new DispatcherTimer(PreviewDelay, DispatcherPriority.Background, (_, _) => RenderPreview(), dispatcher) { IsEnabled = false };
-        _recorder.Changed += () => dispatcher.BeginInvoke(OnStepsChanged);
+        _recorder.Changed += () => dispatcher.BeginInvoke(() => OnStepsChanged());
         OnStepsChanged();
     }
 
@@ -101,11 +102,54 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
 
     [ObservableProperty] private bool _hasScreenshots;
 
+    /// <summary>Shown while the report uses the steps of a failed replay instead of the whole recording.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsFromReplay))]
+    private string _replayNote = "";
+
+    public bool IsFromReplay => ReplayNote.Length > 0;
+
+    /// <summary>
+    /// Starts the report from a replay failure: the steps up to the failed one, with the window as
+    /// the replay saw it when it failed. Fields the tester already wrote are kept.
+    /// </summary>
+    public void UseReplayFailure(IReadOnlyList<RecordedStep> steps, int failedIndex, ReplayStepResult failure)
+    {
+        var failed = steps[failedIndex];
+        var list = steps.Take(failedIndex).ToList();
+        list.Add(failure.Screenshot is { } screenshot ? failed with { Screenshot = screenshot } : failed);
+        _replaySteps = list;
+
+        var wording = StepWording.Describe(failed).TrimEnd('.');
+        if (string.IsNullOrWhiteSpace(Title)) Title = $"Step {failedIndex + 1} fails: {wording}";
+        if (string.IsNullOrWhiteSpace(Expected))
+        {
+            var check = wording.Replace("Check that ", "");
+            Expected = failed.Action is RecordedAction.CheckText or RecordedAction.CheckExists && check.Length > 0
+                ? char.ToUpperInvariant(check[0]) + check[1..] + "."
+                : $"{wording} works, as it did when the steps were recorded.";
+        }
+        if (string.IsNullOrWhiteSpace(Actual)) Actual = failure.Message;
+        if (string.IsNullOrWhiteSpace(Notes)) Notes = $"Found by replaying the recorded steps in UiInspector ({DateTime.Now:g}).";
+        ReplayNote = $"This report uses steps 1–{failedIndex + 1} of the recording, up to the step that failed in the replay; its screenshot shows the window when it failed.";
+        OnStepsChanged(keepReplay: true);
+    }
+
+    [RelayCommand]
+    private void UseAllSteps()
+    {
+        _replaySteps = null;
+        ReplayNote = "";
+        OnStepsChanged();
+    }
+
+    private IReadOnlyList<RecordedStep> ReportSteps => _replaySteps ?? _recorder.Steps;
+
     // Any change to the report's content refreshes the preview (shortly after, so typing stays smooth).
     protected override void OnPropertyChanged(PropertyChangedEventArgs e)
     {
         base.OnPropertyChanged(e);
-        if (e.PropertyName is nameof(PreviewUri) or nameof(Status) or nameof(HasScreenshots)) return;
+        if (e.PropertyName is nameof(PreviewUri) or nameof(Status) or nameof(HasScreenshots) or nameof(ReplayNote) or nameof(IsFromReplay)) return;
         QueuePreview();
     }
 
@@ -116,9 +160,15 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
         _previewTimer.Start();
     }
 
-    private void OnStepsChanged()
+    private void OnStepsChanged(bool keepReplay = false)
     {
-        var steps = _recorder.Steps;
+        // A new or edited recording replaces the replayed steps.
+        if (!keepReplay && _replaySteps is not null && !_recorder.Steps.Take(_replaySteps.Count).Select(s => s.Id).SequenceEqual(_replaySteps.Select(s => s.Id)))
+        {
+            _replaySteps = null;
+            ReplayNote = "";
+        }
+        var steps = ReportSteps;
         var hidden = StepScreenshots.Where(c => !c.Include).Select(c => c.StepId).ToHashSet();
 
         _rebuilding = true;
@@ -172,7 +222,7 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
 
     private BugReport Report()
     {
-        var steps = _recorder.Steps;
+        var steps = ReportSteps;
         return new BugReport
         {
             Title = Title,

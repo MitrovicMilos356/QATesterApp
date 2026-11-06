@@ -91,7 +91,7 @@
         </Border>
 
         <!-- Main area: the inspector, and the bug report across the whole window -->
-        <TabControl Margin="6,6,6,0" AutomationProperties.AutomationId="MainTabs">
+        <TabControl Margin="6,6,6,0" AutomationProperties.AutomationId="MainTabs" SelectedIndex="{Binding SelectedMainTab}">
         <TabItem Header="Inspector" AutomationProperties.AutomationId="InspectorTab">
         <Grid Margin="4,6,4,4">
             <Grid.ColumnDefinitions>
@@ -297,6 +297,13 @@
                                         </TextBlock.Style>
                                     </TextBlock>
                                 </Button>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding TogglePlayCommand}"
+                                        Content="{Binding PlayButtonText}" AutomationProperties.AutomationId="PlayButton"
+                                        ToolTip="Plays the steps back in the app, the way the FlaUI script would, and shows how each one went. Ctrl+Shift+F8 stops it."/>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding ReportFailureCommand}"
+                                        Content="Report this failure" AutomationProperties.AutomationId="ReportFailureButton"
+                                        Visibility="{Binding HasFailure, Converter={StaticResource BoolToVisibility}}"
+                                        ToolTip="Starts a bug report with the steps up to the one that failed, and the window as it was then"/>
                                 <Button Style="{StaticResource ToolButton}" Command="{Binding AddCheckDelayedCommand}"
                                         Content="{Binding CheckButtonText}" AutomationProperties.AutomationId="AddCheckButton"
                                         ToolTip="Adds a step that checks the element under the cursor: its text, or that it exists. While recording, Ctrl+Shift+F7 does it at once."/>
@@ -342,6 +349,28 @@
                                                             </DataTrigger>
                                                             <DataTrigger Binding="{Binding Tone}" Value="bad">
                                                                 <Setter Property="Foreground" Value="#B91C1C"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Replay}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding Replay}" Value="">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding ReplayTone}" Value="ok">
+                                                                <Setter Property="Foreground" Value="#15803D"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding ReplayTone}" Value="warn">
+                                                                <Setter Property="Foreground" Value="#B45309"/>
+                                                            </DataTrigger>
+                                                            <DataTrigger Binding="{Binding ReplayTone}" Value="bad">
+                                                                <Setter Property="Foreground" Value="#B91C1C"/>
+                                                                <Setter Property="FontWeight" Value="SemiBold"/>
                                                             </DataTrigger>
                                                         </Style.Triggers>
                                                     </Style>
@@ -414,6 +443,14 @@
                                 </Style>
                             </StackPanel.Resources>
 
+                            <Border Visibility="{Binding IsFromReplay, Converter={StaticResource BoolToVisibility}}"
+                                    Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="1" Padding="8,6" Margin="0,0,0,8">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding ReplayNote}" TextWrapping="Wrap" AutomationProperties.AutomationId="ReplayNote"/>
+                                    <Button HorizontalAlignment="Left" Margin="0,6,0,0" Padding="8,2" Content="Use all recorded steps"
+                                            Command="{Binding UseAllStepsCommand}" AutomationProperties.AutomationId="UseAllStepsButton"/>
+                                </StackPanel>
+                            </Border>
                             <TextBlock Style="{StaticResource FieldLabel}" Text="Title" Margin="0,0,0,3"/>
                             <TextBox Text="{Binding Title}" AutomationProperties.AutomationId="ReportTitle" AutomationProperties.Name="Title" Padding="3"/>
 

@@ -59,6 +59,56 @@ public class NoDebugPortWebTests(EdgeNoPortFixture fixture) : IClassFixture<Edge
         return web;
     }
 
+    // Replay sets the text the way the scripts do, and the page's own input handler sees it.
+    [Fact]
+    public async Task Replay_TypesIntoAWebField_AndThePageSeesIt()
+    {
+        var email = Find(w => w.FindFirstDescendant(_automation.ConditionFactory.ByAutomationId("email-input")));
+        var inspection = _inspector.InspectElement(_automation, email)!;
+        var path = inspection.Ancestors.Reverse().Append(inspection.Element).ToList();
+        var step = new RecordedStep
+        {
+            Id = 1, Action = RecordedAction.SetValue, Path = path, Text = "probe@example.com",
+            Selector = new SelectorGenerator(_inspector).Generate(_automation, path),
+        };
+        var results = await new Replayer(_worker, new ReplayOptions { StepPause = TimeSpan.Zero }).RunAsync([step]);
+
+        Assert.Equal(ReplayStatus.Passed, results[0].Status);
+        Assert.False(results[0].IsWarning, results[0].Message);
+        Assert.Equal("probe@example.com", email.Patterns.Value.Pattern.Value.Value);
+        Assert.NotNull(Retry.WhileNull(() => Window.FindFirstDescendant(_automation.ConditionFactory.ByName("email: probe@example.com")), TimeSpan.FromSeconds(3)).Result);
+    }
+
+    // Regression (Discord's friend search): React's useId ids change every run, so the field is found
+    // by its label instead, and replay types into it.
+    [Fact]
+    public async Task ReactGeneratedId_IsNotUsed_TheFieldIsFoundByItsLabel()
+    {
+        var search = Find(w => w.FindFirstDescendant(_automation.ConditionFactory.ByAutomationId("_r_b3r_")));
+        var inspection = _inspector.InspectElement(_automation, search)!;
+        var path = inspection.Ancestors.Reverse().Append(inspection.Element).ToList();
+        var selector = new SelectorGenerator(_inspector).Generate(_automation, path);
+
+        var best = selector.Best!;
+        Assert.DoesNotContain(best.Steps, s => s.Get(SelectorProperty.AutomationId) is not null);
+        Assert.Equal("Search friends", best.Steps[^1].Get(SelectorProperty.Name)?.Value);
+
+        var web = await WebAsync("react_search", _ => search);
+        var js = WebCodeTemplates.Render(web).Single(s => s.Id == "playwright-js").Code;
+        Assert.Contains("getByRole('textbox', { name: 'Search friends', exact: true })", js);
+        Assert.DoesNotContain("#_r_b3r_", js); // (the target comment still names it, for the reader)
+
+        var step = new RecordedStep { Id = 1, Action = RecordedAction.SetValue, Path = path, Text = "Ada", Selector = selector };
+        var results = await new Replayer(_worker, new ReplayOptions { StepPause = TimeSpan.Zero }).RunAsync([step]);
+        Assert.Equal(ReplayStatus.Passed, results[0].Status);
+        var reported = Retry.WhileNull(() => Window.FindFirstDescendant(_automation.ConditionFactory.ByName("search: Ada")), TimeSpan.FromSeconds(3)).Result;
+        Assert.True(reported is not null, $"status: {StatusText()}; field: {search.Patterns.Value.Pattern.Value.Value}; replay: {results[0].Message}");
+    }
+
+    private string StatusText() =>
+        Window.FindAllDescendants(_automation.ConditionFactory.ByControlType(ControlType.Text))
+            .Select(t => t.Name).FirstOrDefault(n => n.Contains(':') || n is "Ready") ?? "?";
+
     [Fact]
     public async Task Button_GetsRoleAndName_AndScriptsOpenTheirOwnBrowser()
     {

@@ -43,6 +43,9 @@ public class AttributeStabilityTests
     [InlineData("firefox-view-button")]
     [InlineData("user_admin2")]      // not hex, so not a hash
     [InlineData("RootWebArea")]
+    [InlineData("form:results:table")]    // JSF ids use colons, and are stable
+    [InlineData("search_r_field_")]
+    [InlineData("matrix-3")]
     public void StableAutomationIds(string id)
     {
         Assert.Equal(Stability.Stable, AttributeStability.AnalyzeAutomationId(id).Stability);
@@ -53,6 +56,15 @@ public class AttributeStabilityTests
     [InlineData("{3f2504e0-4f89-11d3-9a0c-0305e82c3301}")]
     [InlineData("btn__972a0")]
     [InlineData("css-1q2w3e")]
+    [InlineData("_r_b3r_")]               // React 19's useId: Discord's friend search box
+    [InlineData(":r1a:")]                 // React 18
+    [InlineData("«r5»")]
+    [InlineData("radix-:r2:")]
+    [InlineData(":r4:-form-item")]
+    [InlineData("mui-12345")]
+    [InlineData("mat-input-0")]
+    [InlineData("ember412")]
+    [InlineData("ui-id-3")]
     [InlineData("")]
     public void UnusableAutomationIds(string id)
     {

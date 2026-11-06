@@ -47,7 +47,18 @@ public sealed partial class MainViewModel : ObservableObject
         Recorder = recorder;
         BugReport = bugReport;
         recorder.RecordingChanged += OnRecordingChanged;
+        recorder.FailureReported += (steps, index, failure) =>
+        {
+            bugReport.UseReplayFailure(steps, index, failure);
+            SelectedMainTab = BugReportTabIndex;
+        };
     }
+
+    private const int BugReportTabIndex = 1;
+
+    /// <summary>The top-level tab: 0 Inspector, 1 Bug report.</summary>
+    [ObservableProperty]
+    private int _selectedMainTab;
 
     public RecorderViewModel Recorder { get; }
 
@@ -247,7 +258,9 @@ public sealed partial class MainViewModel : ObservableObject
                 Status = LivePickEnabled ? "Live pick on: hold Ctrl and hover." : "Live pick off.";
                 break;
             case HotkeyCommand.ToggleRecording:
-                await Recorder.ToggleRecordingAsync();
+                // While a replay runs, the same hotkey stops it (the mouse may be busy in the app).
+                if (Recorder.IsReplaying) await Recorder.TogglePlayAsync();
+                else await Recorder.ToggleRecordingAsync();
                 break;
             case HotkeyCommand.AddCheck:
                 if (Recorder.IsRecording) await Recorder.AddCheckAtCursorAsync();

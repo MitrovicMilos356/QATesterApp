@@ -11,6 +11,7 @@ public partial class MainWindow : Window
     private static readonly TimeSpan PickInterval = TimeSpan.FromMilliseconds(50);
 
     private readonly UiaWorker _worker = new();
+    private readonly UiaWorker _replayWorker = new(); // a replay waits for elements; inspecting stays responsive meanwhile
     private readonly HighlightOverlay _overlay = new();
     private readonly HotkeyListener _hotkeys = new();
     private readonly DispatcherTimer _pickTimer;
@@ -27,7 +28,8 @@ public partial class MainWindow : Window
         var service = new InspectionService(_worker, inspector);
         _recorder = new Recorder(service, inspector);
         _bugReport = new BugReportViewModel(_recorder, Dispatcher);
-        _viewModel = new MainViewModel(service, _overlay, new RecorderViewModel(_recorder, _overlay, Dispatcher), _bugReport);
+        var replayer = new Replayer(_replayWorker);
+        _viewModel = new MainViewModel(service, _overlay, new RecorderViewModel(_recorder, replayer, _overlay, Dispatcher), _bugReport);
         DataContext = _viewModel;
 
         // WebBrowser.Source isn't reliably bindable; navigate whenever a new preview file is written.
@@ -119,5 +121,6 @@ public partial class MainWindow : Window
         _overlay.Close();
         _bugReport.Dispose();
         _worker.Dispose();
+        _replayWorker.Dispose();
     }
 }

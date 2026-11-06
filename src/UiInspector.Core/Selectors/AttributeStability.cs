@@ -42,6 +42,10 @@ public static partial class AttributeStability
         if (string.IsNullOrWhiteSpace(id)) return AttributeVerdict.Unusable(id, "No AutomationId.");
         if (Guid().IsMatch(id)) return AttributeVerdict.Unusable(id, $"AutomationId '{id}' is a GUID, which is usually generated per run.");
         if (HashedToken().IsMatch(id)) return AttributeVerdict.Unusable(id, $"AutomationId '{id}' looks generated (contains a hash).");
+        if (FrameworkGeneratedId().IsMatch(id))
+        {
+            return AttributeVerdict.Unusable(id, $"AutomationId '{id}' is an id the page's framework makes up (like React's useId); it changes when the app restarts or redraws.");
+        }
 
         if (AllDigits().IsMatch(id))
         {
@@ -179,6 +183,13 @@ public static partial class AttributeStability
 
     [GeneratedRegex(@"^\d+$")]
     private static partial Regex AllDigits();
+
+    // Ids web frameworks number at runtime: React's useId (":r1a:", "«r1»", "_r_b3r_"; Discord uses
+    // the last), also inside library ids like "radix-:r2:"; MUI, jQuery UI, Ember, Ext JS, React Aria
+    // and Angular Material counters ("mui-1234", "ui-id-3", "ember412", "mat-input-0").
+    // (Colon ids from JSF, like "form:results:table", are stable: React's need a "-" or nothing around them.)
+    [GeneratedRegex(@"(?:^|-)[:«]r[0-9a-z]{1,8}[:»](?:$|-)|(?:^|-)_r_[0-9a-z]{1,8}_(?:$|-)|^(?:mui|ui-id|ember|ext-gen|ext-comp|react-aria|mat-[a-z-]+?|cdk-[a-z-]+?)-?\d+(?:-\d+)?$")]
+    private static partial Regex FrameworkGeneratedId();
 
     // WinForms/WPF designer defaults: "textBox17", "Panel_42", "button3".
     [GeneratedRegex(@"^(?:textBox|button|label|panel|comboBox|checkBox|listBox|groupBox|radioButton|dataGridView|tabPage)_?\d+$", RegexOptions.IgnoreCase)]
