@@ -143,7 +143,7 @@ public static class BugReportRenderer
         {
             sb.Append("<h2>Steps to reproduce</h2>\n");
             var steps = Steps(report, o);
-            if (steps.Count == 0) sb.Append("<p class=\"empty\">No steps recorded yet. Record them in the Recorder tab.</p>\n");
+            if (steps.Count == 0) sb.Append("<p class=\"empty\">No steps recorded yet. Record them on the Record page.</p>\n");
             else
             {
                 sb.Append("<ol class=\"steps\">\n");

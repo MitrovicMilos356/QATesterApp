@@ -29,4 +29,16 @@ internal static class Native
 
     [DllImport("user32.dll")]
     private static extern short GetAsyncKeyState(int virtualKey);
+
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+
+    /// <summary>A dark title bar for the dark theme (Windows 10 20H1 and later; ignored before).</summary>
+    public static void SetDarkTitleBar(IntPtr hWnd, bool dark)
+    {
+        var value = dark ? 1 : 0;
+        _ = DwmSetWindowAttribute(hWnd, DWMWA_USE_IMMERSIVE_DARK_MODE, ref value, sizeof(int));
+    }
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmSetWindowAttribute(IntPtr hWnd, int attribute, ref int value, int size);
 }

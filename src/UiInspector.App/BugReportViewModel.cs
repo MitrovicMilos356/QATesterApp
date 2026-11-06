@@ -29,7 +29,7 @@ public sealed record ScriptLanguage(string Id, string Title)
 }
 
 /// <summary>
-/// The Bug report tab: what the tester writes (title, expected/actual, notes), a switch for
+/// The Bug report page: what the tester writes (title, expected/actual, notes), a switch for
 /// every part of the report, and a live preview of the exact HTML that gets saved.
 /// </summary>
 public sealed partial class BugReportViewModel : ObservableObject, IDisposable
@@ -291,6 +291,7 @@ public sealed partial class BugReportViewModel : ObservableObject, IDisposable
         try
         {
             Clipboard.SetText(BugReportRenderer.Text(Report(), Options()));
+            Toast.Show("Copied");
             Status = "Copied as text (Markdown). Paste it into Jira, Azure DevOps or GitHub, and attach the screenshots from a saved report.";
         }
         catch (System.Runtime.InteropServices.COMException)

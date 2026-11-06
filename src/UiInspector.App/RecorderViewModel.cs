@@ -21,7 +21,7 @@ public sealed record StepRow(RecordedStep Step, int Number, string Text, string 
 }
 
 /// <summary>
-/// The Recorder tab: start and stop recording, the steps recorded so far, and the script for the
+/// The Record page: start and stop recording, the steps recorded so far, and the script for the
 /// chosen framework. The recorder reports from background threads; everything here runs on the UI thread.
 /// </summary>
 public sealed partial class RecorderViewModel : ObservableObject
@@ -37,6 +37,9 @@ public sealed partial class RecorderViewModel : ObservableObject
     private CancellationTokenSource? _replayCancel;
     private (IReadOnlyList<RecordedStep> Steps, int FailedIndex)? _lastFailure;
     private string _preferredScriptId = "flaui";
+
+    /// <summary>The script language last chosen (remembered between runs).</summary>
+    public string PreferredScriptId { get => _preferredScriptId; set => _preferredScriptId = value; }
     private bool _refreshQueued;
 
     public RecorderViewModel(Recorder recorder, Replayer replayer, IHighlighter highlighter, Dispatcher dispatcher)
@@ -291,6 +294,7 @@ public sealed partial class RecorderViewModel : ObservableObject
         try
         {
             Clipboard.SetText(script.Code);
+            Toast.Show("Copied");
             Status = $"Copied the {script.Title} script to the clipboard.";
         }
         catch (System.Runtime.InteropServices.COMException)

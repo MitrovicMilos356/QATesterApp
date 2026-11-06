@@ -186,6 +186,9 @@ public sealed partial class TestabilityViewModel : ObservableObject, IDisposable
 
     private string? _preferredScriptId;
 
+    /// <summary>The script language last chosen (remembered between runs).</summary>
+    public string? PreferredScriptId { get => _preferredScriptId; set => _preferredScriptId = value; }
+
     private void FillPlan(TestPlan plan)
     {
         Features.Clear();
@@ -447,6 +450,7 @@ public sealed partial class TestabilityViewModel : ObservableObject, IDisposable
         try
         {
             Clipboard.SetText(text);
+            Toast.Show("Copied");
             Status = done;
         }
         catch (System.Runtime.InteropServices.COMException)
@@ -509,7 +513,7 @@ public sealed partial class TestabilityViewModel : ObservableObject, IDisposable
     {
         if (_selectedElement() is not { } element)
         {
-            Status = "Pick an element in the Inspector tab first (Ctrl-hover or the tree); its window is analyzed.";
+            Status = "Pick an element on the Inspect page first (Ctrl-hover or the tree); its window is analyzed.";
             return;
         }
         IsBusy = true;
@@ -659,6 +663,7 @@ public sealed partial class TestabilityViewModel : ObservableObject, IDisposable
         try
         {
             Clipboard.SetText(TestabilityRenderer.Text(_report));
+            Toast.Show("Copied");
             Status = "Copied as text (Markdown), for a ticket or a chat. The saved HTML also has the numbered screenshot.";
         }
         catch (System.Runtime.InteropServices.COMException)

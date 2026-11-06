@@ -23,6 +23,15 @@ From the repository root:
 dotnet run --project src/UiInspector.App
 ```
 
+The rail on the left has four pages: **Inspect**, **Record**, **Test plan** and **Bug report**.
+Each page has its title, a status line and its buttons at the top; an empty page says how to
+start. At the bottom of the rail, **Keys** (or `F1`) lists the keyboard shortcuts, and the theme
+button switches between Light, Dark and the Windows setting. The window remembers its size and
+place, the splitters, the page shown, the theme and the code languages you chose last
+(`%LOCALAPPDATA%\UiInspector\settings.json`; the `UIINSPECTOR_SETTINGS` environment variable
+points it at another file, as test runs do). Copying anything shows a short "Copied" notice,
+and the code boxes colour the code and have their own **Copy** button.
+
 | How | What it does |
 | :--- | :--- |
 | **Hold `Ctrl`** and hover over any app | Live preview: an orange frame follows the cursor and the details panel updates |
@@ -129,7 +138,7 @@ app's Chromium version for Selenium.
 
 ### Recorder: click through a workflow, get a script
 
-Open the **Recorder** tab and press **● Record** (or `Ctrl+Shift+F8` from any app), then use the app
+Open the **Record** page and press **● Record** (or `Ctrl+Shift+F8` from any app), then use the app
 you want to test. Each action becomes a step with a verified selector:
 
 | You do | Step in the script |
@@ -172,7 +181,7 @@ How it works, and what it doesn't capture:
 
 ### Replay: check a recording before using its script
 
-**▶ Play** in the Recorder tab plays the steps back in the app, the way the FlaUI script would:
+**▶ Play** on the Record page plays the steps back in the app, the way the FlaUI script would:
 each step's selector is searched from the desktop (waiting up to 10 s), then the same action is
 performed, a UIA pattern call (Invoke, Toggle, SetValue…) where the element has one and the real
 mouse or keyboard only where the script uses them too. Each step is highlighted as it runs and
@@ -183,7 +192,7 @@ scripts). The replay stops at the first failure, like the scripts do.
   Text "Order 1042" in the window*), that the window isn't open, that a position no longer exists
   (*Only 2 elements match…; the step wants #3*), or what a check got instead (*Expected "Saved",
   but it shows "Error"*). When several elements match, the first is used and the step says so.
-- **Report this failure** opens the Bug report tab with the steps up to the failed one, the
+- **Report this failure** opens the Bug report page with the steps up to the failed one, the
   window as it was at the failure (with the element outlined, if it was found), and the title,
   expected and actual result filled in where they were still empty. *Use all recorded steps* goes
   back to the whole recording.
@@ -198,7 +207,7 @@ scripts). The replay stops at the first failure, like the scripts do.
 
 ### Bug report: from a recording to a report a developer can act on
 
-Record the steps that lead to the bug, then open the **Bug report** tab. Fill in the title,
+Record the steps that lead to the bug, then open the **Bug report** page. Fill in the title,
 severity, expected and actual result (and notes, if any); the steps, screenshots and environment
 come from the recording. The preview on the right shows exactly what **Save HTML** writes and
 updates as you change anything.
@@ -222,13 +231,13 @@ puts Markdown without images on the clipboard, for Jira, Azure DevOps or GitHub.
 
 Screenshots show only the app's own window (it's asked to draw itself), never the screen, so
 other apps and overlapping windows don't appear. Switch them off with **Screenshots** in the
-Recorder tab. The preview files are kept in a temporary folder that's deleted when the app closes.
+the Record page. The preview files are kept in a temporary folder that's deleted when the app closes.
 
 ### Test plan: what to test, and how
 
-The **Test plan** tab looks at a window or web page and suggests what to test. Pick it with
+The **Test plan** page looks at a window or web page and suggests what to test. Pick it with
 **Analyze window under cursor (3 s)**, or **Analyze picked element's window** for the element
-selected in the Inspector tab. Nothing in the app is clicked: the window is read in one go
+selected on the Inspect page. Nothing in the app is clicked: the window is read in one go
 (about 1.5 s for a job site's page). Two views come out of that one read: **What to test**
 (below) and **Testability** (the next section).
 
@@ -260,15 +269,17 @@ Every case has an id (`LOGIN-07`), a kind (works, bad input, limits, security, a
 usability), a priority, steps that name the controls found (*Type the data below into the
 “Email” field*), the data, and the expected result. Where only the tester can know the rule
 (the minimum length, the exact message), the case says so instead of guessing. Filter the
-table by priority, kind or "worth automating".
+table by priority, kind or "worth automating" with the buttons above it; the kind and the
+priority show as coloured labels.
 
-- **Select a row** to see its steps, the exact value in a box you can select, and buttons to
-  copy the value, the steps or the whole case (also by right-click, and Ctrl+C copies the value).
+- **Select a row** and the panel on the right shows its steps, the exact value in a box you can
+  select, the expected result, what a failure means, and buttons to copy the value, the steps or
+  the whole case (also by right-click, and Ctrl+C copies the value). Its script is under it.
   The value is exactly what to type: "1,000 × the letter a" copies the 1,000 characters, a value
   shown in quotes copies its spaces without the quotes. Values only the tester can choose (their
   own minimum length) copy as their description.
 - **The control is outlined in the app**, like a Ctrl pick, while its row or feature is selected:
-  a field further down the page is scrolled into view first. Leaving the tab removes the outline.
+  a field further down the page is scrolled into view first. Leaving the page removes the outline.
 - **Security cases say what a failure means**, under "If it fails". An alert from
   `<script>alert('x')</script>` is harmless in itself, but proves the page runs code users type
   (cross-site scripting): put in a link or a saved field, an attacker's code would run in other

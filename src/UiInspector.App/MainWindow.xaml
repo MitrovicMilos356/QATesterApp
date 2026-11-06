@@ -3,303 +3,476 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:UiInspector.App"
         Title="UI Inspector"
-        Width="1100" Height="720" MinWidth="720" MinHeight="420"
-        Background="White"
+        Width="1200" Height="780" MinWidth="820" MinHeight="480"
         FontFamily="Segoe UI" FontSize="13"
+        Background="{DynamicResource SolidBackgroundFillColorBaseBrush}"
         AutomationProperties.AutomationId="UiInspectorMainWindow">
 
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVisibility"/>
+        <local:PageVisibilityConverter x:Key="PageVisibility"/>
+        <local:EmptyVisibilityConverter x:Key="EmptyVisibility"/>
 
-        <Style x:Key="ToolButton" TargetType="ButtonBase">
-            <Setter Property="Padding" Value="10,5"/>
-            <Setter Property="Margin" Value="0,0,6,0"/>
-            <Setter Property="MinHeight" Value="30"/>
-        </Style>
-
-        <Style x:Key="TreeItemStyle" TargetType="TreeViewItem">
+        <Style x:Key="TreeItemStyle" TargetType="TreeViewItem" BasedOn="{StaticResource {x:Type TreeViewItem}}">
             <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
             <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
             <Setter Property="AutomationProperties.Name" Value="{Binding AccessibleName}"/>
-            <Setter Property="Padding" Value="1,1"/>
         </Style>
+
+        <!-- Lists on a card: no border of their own. -->
+        <Style x:Key="CardList" TargetType="ListBox" BasedOn="{StaticResource {x:Type ListBox}}">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="ScrollViewer.HorizontalScrollBarVisibility" Value="Disabled"/>
+        </Style>
+
+        <!-- The message shown where a list is still empty. -->
+        <Style x:Key="EmptyState" TargetType="StackPanel">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="MaxWidth" Value="380"/>
+            <Setter Property="Margin" Value="24"/>
+        </Style>
+        <Style x:Key="EmptyIcon" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="{StaticResource IconFont}"/>
+            <Setter Property="FontSize" Value="36"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextFillColorTertiaryBrush}"/>
+        </Style>
+        <Style x:Key="EmptyTitle" TargetType="TextBlock" BasedOn="{StaticResource SectionTitle}">
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="0,12,0,4"/>
+        </Style>
+        <Style x:Key="EmptyText" TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
+            <Setter Property="TextAlignment" Value="Center"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+        </Style>
+
+        <!-- A coloured bar with a message: blue for hints, amber for warnings (BannerIsWarning / WebIsWarning). -->
+        <Style x:Key="InfoBar" TargetType="Border">
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CardStrokeColorDefaultBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource SystemFillColorAttentionBackgroundBrush}"/>
+        </Style>
+
+        <!-- Kind and priority of a test case. -->
+        <DataTemplate x:Key="KindChip">
+            <Border Style="{StaticResource Chip}" Margin="2,3">
+                <TextBlock Text="{Binding Kind}" FontSize="12"/>
+            </Border>
+        </DataTemplate>
+        <DataTemplate x:Key="PriorityChip">
+            <Border Margin="2,3">
+                <Border.Style>
+                    <Style TargetType="Border" BasedOn="{StaticResource Chip}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding Priority}" Value="High">
+                                <Setter Property="Background" Value="{DynamicResource SystemFillColorCriticalBackgroundBrush}"/>
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding Priority}" Value="Medium">
+                                <Setter Property="Background" Value="{DynamicResource SystemFillColorCautionBackgroundBrush}"/>
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+                <TextBlock Text="{Binding Priority}" FontSize="12">
+                    <TextBlock.Style>
+                        <Style TargetType="TextBlock">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding Priority}" Value="High">
+                                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}"/>
+                                    <Setter Property="FontWeight" Value="SemiBold"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+            </Border>
+        </DataTemplate>
     </Window.Resources>
 
-    <DockPanel>
-        <!-- Toolbar -->
-        <Border DockPanel.Dock="Top" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="0,0,0,1" Padding="10,8">
-            <WrapPanel VerticalAlignment="Center">
-                <ToggleButton Style="{StaticResource ToolButton}" IsChecked="{Binding LivePickEnabled}"
-                              AutomationProperties.AutomationId="LivePickToggle"
-                              ToolTip="Hold Ctrl and hover over any app; release Ctrl to pick. Toggle: Ctrl+Shift+F12">
-                    <TextBlock><Run FontWeight="SemiBold" Text="Live pick"/><Run Foreground="{StaticResource MutedBrush}" Text="  (hold Ctrl)"/></TextBlock>
-                </ToggleButton>
-                <Button Style="{StaticResource ToolButton}" Command="{Binding InspectFocusedCommand}"
-                        AutomationProperties.AutomationId="InspectFocusedButton"
-                        Content="Focused element" ToolTip="Inspect the element with keyboard focus. Works from any app: Ctrl+Shift+F10"/>
-                <Button Style="{StaticResource ToolButton}" Command="{Binding DelayedCaptureCommand}"
-                        AutomationProperties.AutomationId="DelayedCaptureButton"
-                        Content="{Binding DelayedCaptureText}"
-                        ToolTip="For menus and tooltips: click, open the menu in the target app, keep the cursor on the item. Hotkey: Ctrl+Shift+F11"/>
-                <Button Style="{StaticResource ToolButton}" Command="{Binding BrowseWindowsCommand}"
-                        AutomationProperties.AutomationId="BrowseWindowsButton"
-                        Content="Browse windows" ToolTip="List every top-level window and pick from the tree: for hidden, covered or off-screen elements"/>
-                <Separator Margin="4,2,10,2"/>
-                <CheckBox VerticalAlignment="Center" Margin="0,0,14,0" IsChecked="{Binding SmartTargetEnabled}"
-                          AutomationProperties.AutomationId="SmartTargetCheckBox"
-                          Content="Smart target" ToolTip="When you point at a label or icon inside a control, select the control (button, link, list item…) instead"/>
-                <CheckBox VerticalAlignment="Center" Margin="0,0,14,0" IsChecked="{Binding HighlightEnabled}"
-                          AutomationProperties.AutomationId="HighlightCheckBox"
-                          Content="Highlight on screen"/>
-                <Button Style="{StaticResource ToolButton}" Command="{Binding CopyDetailsCommand}"
-                        AutomationProperties.AutomationId="CopyDetailsButton"
-                        Content="Copy details"/>
-            </WrapPanel>
-        </Border>
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
 
-        <!-- Status bar -->
-        <Border DockPanel.Dock="Bottom" BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="0,1,0,0" Padding="10,5" Background="#F9FAFB">
-            <DockPanel>
-                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}"
-                           Text="Ctrl+Shift+F9 pick under cursor · F10 focused · F11 delayed · F12 live pick on/off · F8 record · F7 add check"/>
-                <TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis" Margin="0,0,16,0"
-                           AutomationProperties.AutomationId="StatusText"/>
-            </DockPanel>
-        </Border>
+        <!-- ============================================================ navigation rail -->
+        <DockPanel Grid.Column="0" Width="80">
+            <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,8">
+                <Button x:Name="KeysButton" Style="{StaticResource RailButton}" Tag="&#xE765;" Content="Keys" Click="KeysButton_Click"
+                        AutomationProperties.AutomationId="KeysButton" AutomationProperties.Name="Keyboard shortcuts"
+                        ToolTip="Keyboard shortcuts (F1)"/>
+                <Button x:Name="ThemeButton" Style="{StaticResource RailButton}" Tag="&#xE706;" Content="System" Click="ThemeButton_Click"
+                        AutomationProperties.AutomationId="ThemeButton" AutomationProperties.Name="Theme"
+                        ToolTip="Light, dark, or as Windows is set"/>
+            </StackPanel>
+            <ListBox SelectedIndex="{Binding SelectedMainTab}" ItemContainerStyle="{StaticResource NavItem}"
+                     Background="Transparent" BorderThickness="0" Margin="0,10,0,0"
+                     AutomationProperties.AutomationId="MainTabs" AutomationProperties.Name="Pages">
+                <ListBoxItem Tag="&#xE890;" Content="Inspect" AutomationProperties.AutomationId="InspectorTab"
+                             ToolTip="See any element of any app, with its selector and code"/>
+                <ListBoxItem Tag="&#xE7C8;" Content="Record" AutomationProperties.AutomationId="RecorderTab"
+                             ToolTip="Record clicks and typing as a test script, and play them back"/>
+                <ListBoxItem Tag="&#xE9D5;" Content="Test plan" AutomationProperties.AutomationId="TestabilityTab"
+                             ToolTip="What to test in a window or page, with test cases, data and scripts"/>
+                <ListBoxItem Tag="&#xEBE8;" Content="Bug report" AutomationProperties.AutomationId="BugReportTab"
+                             ToolTip="A bug report from the recorded steps, with screenshots"/>
+            </ListBox>
+        </DockPanel>
 
-        <!-- Banner (smart target / web content hints) -->
-        <Border DockPanel.Dock="Top" Padding="12,8" Visibility="{Binding HasBanner, Converter={StaticResource BoolToVisibility}}">
-            <Border.Style>
-                <Style TargetType="Border">
-                    <Setter Property="Background" Value="{StaticResource InfoBackBrush}"/>
-                    <Style.Triggers>
-                        <DataTrigger Binding="{Binding BannerIsWarning}" Value="True">
-                            <Setter Property="Background" Value="{StaticResource WarningBackBrush}"/>
-                        </DataTrigger>
-                    </Style.Triggers>
-                </Style>
-            </Border.Style>
-            <DockPanel>
-                <Button DockPanel.Dock="Right" Padding="8,3" Margin="12,0,0,0" VerticalAlignment="Center"
-                        Command="{Binding SelectPickedElementCommand}"
-                        Visibility="{Binding CanSelectPickedElement, Converter={StaticResource BoolToVisibility}}"
-                        AutomationProperties.AutomationId="SelectPickedElementButton"
-                        Content="Select what I pointed at"/>
-                <TextBlock Text="{Binding BannerText}" TextWrapping="Wrap" VerticalAlignment="Center"
-                           AutomationProperties.AutomationId="BannerText"/>
-            </DockPanel>
-        </Border>
-
-        <!-- Main area: the inspector, and the bug report across the whole window -->
-        <TabControl Margin="6,6,6,0" AutomationProperties.AutomationId="MainTabs" SelectedIndex="{Binding SelectedMainTab}">
-        <TabItem Header="Inspector" AutomationProperties.AutomationId="InspectorTab">
-        <Grid Margin="4,6,4,4">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="5*" MinWidth="260"/>
-                <ColumnDefinition Width="6"/>
-                <ColumnDefinition Width="4*" MinWidth="300"/>
-            </Grid.ColumnDefinitions>
-
-            <!-- Element tree -->
-            <DockPanel Grid.Column="0">
-                <TextBlock DockPanel.Dock="Top" Text="Element tree" FontWeight="SemiBold" Margin="2,0,0,6"/>
-                <TreeView x:Name="ElementTree" ItemsSource="{Binding RootNodes}"
-                          ItemContainerStyle="{StaticResource TreeItemStyle}"
-                          BorderBrush="{StaticResource PanelBorderBrush}"
-                          SelectedItemChanged="ElementTree_SelectedItemChanged"
-                          TreeViewItem.Selected="ElementTree_ItemSelected"
-                          VirtualizingPanel.IsVirtualizing="True"
-                          AutomationProperties.AutomationId="ElementTree">
-                    <TreeView.ItemTemplate>
-                        <HierarchicalDataTemplate DataType="{x:Type local:TreeNodeViewModel}" ItemsSource="{Binding Children}">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="▶ " Foreground="#DC2626"
-                                           Visibility="{Binding IsHitElement, Converter={StaticResource BoolToVisibility}}"/>
-                                <TextBlock Text="{Binding TypeText}" Foreground="{StaticResource TypeBrush}">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsOnPath}" Value="True">
-                                                    <Setter Property="FontWeight" Value="SemiBold"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                                <TextBlock Text="{Binding NameText}" Margin="5,0,0,0">
-                                    <TextBlock.Style>
-                                        <Style TargetType="TextBlock">
-                                            <Style.Triggers>
-                                                <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
-                                                    <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-                                                    <Setter Property="FontStyle" Value="Italic"/>
-                                                </DataTrigger>
-                                            </Style.Triggers>
-                                        </Style>
-                                    </TextBlock.Style>
-                                </TextBlock>
-                                <TextBlock Text="{Binding IdText}" Foreground="{StaticResource IdBrush}" Margin="6,0,0,0"/>
-                                <TextBlock Text="{Binding ClassText}" Foreground="{StaticResource MutedBrush}" Margin="6,0,0,0"/>
-                            </StackPanel>
-                        </HierarchicalDataTemplate>
-                    </TreeView.ItemTemplate>
-                </TreeView>
-            </DockPanel>
-
-            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
-
-            <!-- Details -->
-            <DockPanel Grid.Column="2">
-                <StackPanel DockPanel.Dock="Top" Margin="2,0,0,8">
-                    <TextBlock Text="{Binding DetailTitle}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
-                               AutomationProperties.AutomationId="DetailTitle"/>
-                    <TextBlock Text="{Binding DetailSubtitle}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,2,0,0">
-                        <TextBlock.Style>
-                            <Style TargetType="TextBlock">
-                                <Style.Triggers>
-                                    <DataTrigger Binding="{Binding IsPreview}" Value="True">
-                                        <Setter Property="Foreground" Value="#B45309"/>
-                                    </DataTrigger>
-                                </Style.Triggers>
-                            </Style>
-                        </TextBlock.Style>
-                    </TextBlock>
+        <!-- Keyboard shortcuts, next to the Keys button. -->
+        <Popup x:Name="KeysPopup" PlacementTarget="{Binding ElementName=KeysButton}" Placement="Right" HorizontalOffset="6"
+               StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade" Closed="KeysPopup_Closed">
+            <Border Style="{StaticResource Card}" Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}" Padding="18,14" Margin="0,0,10,10"
+                    AutomationProperties.AutomationId="KeysSheet">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="14" ShadowDepth="3" Opacity="0.25"/>
+                </Border.Effect>
+                <StackPanel>
+                    <TextBlock Style="{StaticResource SectionTitle}" Text="Keyboard shortcuts"/>
+                    <TextBlock Style="{StaticResource MutedText}" Text="These work from any app, while the inspector runs." Margin="0,2,0,10"/>
+                    <ItemsControl ItemsSource="{x:Static local:MainWindow.Shortcuts}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Margin="0,3">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="150"/>
+                                        <ColumnDefinition Width="260"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Style="{StaticResource Chip}" CornerRadius="4" BorderThickness="1"
+                                            BorderBrush="{DynamicResource ControlStrokeColorDefaultBrush}" Background="{DynamicResource ControlFillColorDefaultBrush}">
+                                        <TextBlock Text="{Binding Key}" FontFamily="{StaticResource CodeFont}" FontSize="12"/>
+                                    </Border>
+                                    <TextBlock Grid.Column="1" Text="{Binding Value}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <TextBlock Style="{StaticResource MutedText}" TextWrapping="Wrap" MaxWidth="410" Margin="0,10,0,0" HorizontalAlignment="Left"
+                               Text="Live pick: hold Ctrl over any app; the element under the cursor is outlined, and picked when you let go."/>
                 </StackPanel>
+            </Border>
+        </Popup>
 
-                <TabControl AutomationProperties.AutomationId="DetailTabs">
-                <TabItem Header="Properties" AutomationProperties.AutomationId="PropertiesTab">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-                        <ItemsControl ItemsSource="{Binding Properties}" Margin="8,6" AutomationProperties.AutomationId="PropertiesList">
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate DataType="{x:Type local:PropertyRow}">
-                                    <Grid Margin="0,3">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="140"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
-                                        <TextBlock Text="{Binding Name}" Foreground="{StaticResource MutedBrush}"/>
-                                        <!-- Read-only TextBox so values can be selected and copied. -->
-                                        <TextBox Grid.Column="1" Text="{Binding Value, Mode=OneWay}" IsReadOnly="True"
-                                                 BorderThickness="0" Background="Transparent" Padding="0"
-                                                 TextWrapping="Wrap" AutomationProperties.Name="{Binding Name}"/>
-                                    </Grid>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </ScrollViewer>
-                </TabItem>
+        <!-- ============================================================ pages -->
+        <Border Grid.Column="1" CornerRadius="8,0,0,0" BorderThickness="1,1,0,0"
+                Background="{DynamicResource LayerFillColorDefaultBrush}" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}">
+            <DockPanel>
+                <!-- Status bar -->
+                <Border x:Name="StatusBar" DockPanel.Dock="Bottom" BorderBrush="{DynamicResource DividerStrokeColorDefaultBrush}" BorderThickness="0,1,0,0" Padding="20,6">
+                    <TextBlock Text="{Binding Status}" TextTrimming="CharacterEllipsis" Style="{StaticResource MutedText}"
+                               AutomationProperties.AutomationId="StatusText"/>
+                </Border>
 
-                <TabItem Header="Selector &amp; code" AutomationProperties.AutomationId="SelectorTab">
-                    <DockPanel Margin="8,8,8,6">
-                        <StackPanel DockPanel.Dock="Top">
-                            <TextBlock Text="{Binding SelectorHeadline}" TextWrapping="Wrap" FontWeight="SemiBold"
-                                       AutomationProperties.AutomationId="SelectorHeadline">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding SelectorTone}" Value="ok">
-                                                <Setter Property="Foreground" Value="#15803D"/>
-                                            </DataTrigger>
-                                            <DataTrigger Binding="{Binding SelectorTone}" Value="bad">
-                                                <Setter Property="Foreground" Value="#B91C1C"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-
-                            <ComboBox Margin="0,8,0,0" ItemsSource="{Binding SelectorChoices}" SelectedItem="{Binding SelectedChoice}"
-                                      DisplayMemberPath="Label" ToolTip="Other verified selectors for the same element"
-                                      Visibility="{Binding HasAlternatives, Converter={StaticResource BoolToVisibility}}"
-                                      AutomationProperties.AutomationId="SelectorChoices"/>
-
-                            <TextBox Margin="0,8,0,0" Text="{Binding SelectorSteps, Mode=OneWay}" IsReadOnly="True"
-                                     FontFamily="Consolas" FontSize="12" BorderThickness="0" Background="#F9FAFB" Padding="6,4"
-                                     TextWrapping="Wrap" AutomationProperties.AutomationId="SelectorSteps"/>
-
-                            <ItemsControl ItemsSource="{Binding SelectorWarnings}" Margin="0,6,0,0" AutomationProperties.AutomationId="SelectorWarnings">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding StringFormat='⚠ {0}'}" TextWrapping="Wrap" Foreground="#B45309" Margin="0,2"/>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-
-                            <TextBlock Text="{Binding OcclusionText}" TextWrapping="Wrap" Margin="0,4,0,0"
-                                       AutomationProperties.AutomationId="OcclusionText">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding OcclusionIsWarning}" Value="True">
-                                                <Setter Property="Foreground" Value="#B45309"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-
-                            <Border Margin="0,8,0,0" Padding="8,6" CornerRadius="3"
-                                    Visibility="{Binding HasWebSummary, Converter={StaticResource BoolToVisibility}}">
-                                <Border.Style>
-                                    <Style TargetType="Border">
-                                        <Setter Property="Background" Value="{StaticResource InfoBackBrush}"/>
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding WebIsWarning}" Value="True">
-                                                <Setter Property="Background" Value="{StaticResource WarningBackBrush}"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </Border.Style>
-                                <TextBox Text="{Binding WebSummary, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
-                                         BorderThickness="0" Background="Transparent" Padding="0"
-                                         AutomationProperties.AutomationId="WebSummary"/>
-                            </Border>
-
-                            <DockPanel Margin="0,10,0,6">
-                                <Button DockPanel.Dock="Right" Padding="10,3" Content="Copy code" Command="{Binding CopyCodeCommand}"
-                                        AutomationProperties.AutomationId="CopyCodeButton"/>
-                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="0,0,8,0" VerticalAlignment="Center"
-                                            ToolTip="Chromium remote-debugging port for web code. Leave empty to read it from the app's command line.">
-                                    <TextBlock Text="Debug port" Foreground="{StaticResource MutedBrush}" VerticalAlignment="Center" Margin="0,0,4,0"/>
-                                    <TextBox Width="52" Text="{Binding CdpPortText, UpdateSourceTrigger=PropertyChanged}"
-                                             AutomationProperties.AutomationId="CdpPortBox" AutomationProperties.Name="Debug port"/>
-                                </StackPanel>
-                                <ComboBox ItemsSource="{Binding Snippets}" SelectedItem="{Binding SelectedSnippet}" DisplayMemberPath="Title"
-                                          Margin="0,0,8,0" AutomationProperties.AutomationId="LanguageChoice"/>
-                            </DockPanel>
-                        </StackPanel>
-
-                        <TextBox Text="{Binding SelectedSnippet.Code, Mode=OneWay}" IsReadOnly="True"
-                                 FontFamily="Consolas" FontSize="12" Padding="6"
-                                 HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                                 AutomationProperties.AutomationId="CodeText"/>
-                    </DockPanel>
-                </TabItem>
-
-                <TabItem Header="Recorder" AutomationProperties.AutomationId="RecorderTab" DataContext="{Binding Recorder}">
-                    <DockPanel Margin="8,8,8,6">
+                <Grid>
+                    <!-- ======================================================== Inspect -->
+                    <DockPanel Margin="20,16,20,10" Visibility="{Binding SelectedMainTab, Converter={StaticResource PageVisibility}, ConverterParameter=0}">
                         <StackPanel DockPanel.Dock="Top">
                             <WrapPanel>
-                                <Button Style="{StaticResource ToolButton}" Command="{Binding ToggleRecordingCommand}"
-                                        AutomationProperties.AutomationId="RecordButton"
-                                        ToolTip="Start or stop recording. Works from any app: Ctrl+Shift+F8">
-                                    <TextBlock Text="{Binding RecordButtonText}" FontWeight="SemiBold">
+                                <TextBlock Style="{StaticResource PageTitle}" Text="Inspect" Margin="0,0,14,0"/>
+                                <TextBlock Style="{StaticResource MutedText}" VerticalAlignment="Bottom" Margin="0,0,0,4"
+                                           Text="Point at any app to see the element, a selector that finds it, and code."/>
+                            </WrapPanel>
+                            <WrapPanel Margin="0,14,0,4">
+                                <ToggleButton Style="{StaticResource ToolToggle}" IsChecked="{Binding LivePickEnabled}"
+                                              AutomationProperties.AutomationId="LivePickToggle" AutomationProperties.Name="Live pick"
+                                              ToolTip="Hold Ctrl and hover over any app; release Ctrl to pick. Toggle: Ctrl+Shift+F12">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE7C9;" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                        <TextBlock><Run FontWeight="SemiBold" Text="Live pick"/><Run Text="  hold Ctrl"/></TextBlock>
+                                    </StackPanel>
+                                </ToggleButton>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding InspectFocusedCommand}"
+                                        AutomationProperties.AutomationId="InspectFocusedButton"
+                                        Content="Focused element" ToolTip="Inspect the element with keyboard focus. Works from any app: Ctrl+Shift+F10"/>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding DelayedCaptureCommand}"
+                                        AutomationProperties.AutomationId="DelayedCaptureButton"
+                                        Content="{Binding DelayedCaptureText}"
+                                        ToolTip="For menus and tooltips: click, open the menu in the target app, keep the cursor on the item. Hotkey: Ctrl+Shift+F11"/>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding BrowseWindowsCommand}"
+                                        AutomationProperties.AutomationId="BrowseWindowsButton"
+                                        Content="Browse windows" ToolTip="List every top-level window and pick from the tree: for hidden, covered or off-screen elements"/>
+                                <Button Style="{StaticResource ToolButton}" Command="{Binding CopyDetailsCommand}"
+                                        AutomationProperties.AutomationId="CopyDetailsButton"
+                                        Content="Copy details"/>
+                                <CheckBox Style="{StaticResource ToolCheck}" IsChecked="{Binding SmartTargetEnabled}" Margin="10,0,10,6"
+                                          AutomationProperties.AutomationId="SmartTargetCheckBox"
+                                          Content="Smart target" ToolTip="When you point at a label or icon inside a control, select the control (button, link, list item…) instead"/>
+                                <CheckBox Style="{StaticResource ToolCheck}" IsChecked="{Binding HighlightEnabled}"
+                                          AutomationProperties.AutomationId="HighlightCheckBox"
+                                          Content="Highlight on screen"/>
+                            </WrapPanel>
+                        </StackPanel>
+
+                        <!-- Banner (smart target / web content hints) -->
+                        <Border DockPanel.Dock="Top" Margin="0,4,0,10" Visibility="{Binding HasBanner, Converter={StaticResource BoolToVisibility}}">
+                            <Border.Style>
+                                <Style TargetType="Border" BasedOn="{StaticResource InfoBar}">
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding BannerIsWarning}" Value="True">
+                                            <Setter Property="Background" Value="{DynamicResource SystemFillColorCautionBackgroundBrush}"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Border.Style>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Padding="10,4" Margin="12,0,0,0" VerticalAlignment="Center"
+                                        Command="{Binding SelectPickedElementCommand}"
+                                        Visibility="{Binding CanSelectPickedElement, Converter={StaticResource BoolToVisibility}}"
+                                        AutomationProperties.AutomationId="SelectPickedElementButton"
+                                        Content="Select what I pointed at"/>
+                                <TextBlock Text="{Binding BannerText}" TextWrapping="Wrap" VerticalAlignment="Center"
+                                           AutomationProperties.AutomationId="BannerText"/>
+                            </DockPanel>
+                        </Border>
+
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="InspectTreeColumn" Width="5*" MinWidth="260"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition x:Name="InspectDetailsColumn" Width="4*" MinWidth="320"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Element tree -->
+                            <Border Grid.Column="0" Style="{StaticResource Card}" Padding="4">
+                                <Grid>
+                                    <TreeView x:Name="ElementTree" ItemsSource="{Binding RootNodes}"
+                                              ItemContainerStyle="{StaticResource TreeItemStyle}"
+                                              Background="Transparent" BorderThickness="0"
+                                              SelectedItemChanged="ElementTree_SelectedItemChanged"
+                                              TreeViewItem.Selected="ElementTree_ItemSelected"
+                                              VirtualizingPanel.IsVirtualizing="True"
+                                              AutomationProperties.AutomationId="ElementTree">
+                                        <TreeView.ItemTemplate>
+                                            <HierarchicalDataTemplate DataType="{x:Type local:TreeNodeViewModel}" ItemsSource="{Binding Children}">
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="▶ " Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                                                               Visibility="{Binding IsHitElement, Converter={StaticResource BoolToVisibility}}"/>
+                                                    <TextBlock Text="{Binding TypeText}" Foreground="{DynamicResource AccentTextFillColorPrimaryBrush}">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsOnPath}" Value="True">
+                                                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding NameText}" Margin="5,0,0,0">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsPlaceholder}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                                                        <Setter Property="FontStyle" Value="Italic"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding IdText}" Foreground="{DynamicResource SystemFillColorSuccessBrush}" Margin="6,0,0,0"/>
+                                                    <TextBlock Text="{Binding ClassText}" Style="{StaticResource MutedText}" Margin="6,0,0,0"/>
+                                                </StackPanel>
+                                            </HierarchicalDataTemplate>
+                                        </TreeView.ItemTemplate>
+                                    </TreeView>
+
+                                    <StackPanel Style="{StaticResource EmptyState}"
+                                                Visibility="{Binding RootNodes.Count, Converter={StaticResource EmptyVisibility}}"
+                                                AutomationProperties.AutomationId="InspectEmptyState">
+                                        <TextBlock Style="{StaticResource EmptyIcon}" Text="&#xE7C9;"/>
+                                        <TextBlock Style="{StaticResource EmptyTitle}" Text="Nothing inspected yet"/>
+                                        <TextBlock Style="{StaticResource EmptyText}"
+                                                   Text="Hold Ctrl and hover over any app: the element under the cursor is outlined. Let go of Ctrl to pick it."/>
+                                        <WrapPanel HorizontalAlignment="Center" Margin="0,14,0,0">
+                                            <Button Style="{StaticResource PrimaryButton}" Command="{Binding BrowseWindowsCommand}" Content="Browse windows"
+                                                    AutomationProperties.AutomationId="EmptyBrowseWindowsButton"/>
+                                            <Button Style="{StaticResource ToolButton}" Command="{Binding InspectFocusedCommand}" Content="Focused element"
+                                                    AutomationProperties.AutomationId="EmptyInspectFocusedButton"/>
+                                        </WrapPanel>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <GridSplitter Grid.Column="1" Width="12" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                            <!-- Details -->
+                            <DockPanel Grid.Column="2">
+                                <StackPanel DockPanel.Dock="Top" Margin="2,0,0,8">
+                                    <TextBlock Text="{Binding DetailTitle}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap"
+                                               AutomationProperties.AutomationId="DetailTitle"/>
+                                    <TextBlock Text="{Binding DetailSubtitle}" TextWrapping="Wrap" Margin="0,2,0,0">
                                         <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
+                                            <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
                                                 <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsRecording}" Value="True">
-                                                        <Setter Property="Foreground" Value="#B91C1C"/>
+                                                    <DataTrigger Binding="{Binding IsPreview}" Value="True">
+                                                        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
                                             </Style>
                                         </TextBlock.Style>
                                     </TextBlock>
+                                </StackPanel>
+
+                                <TabControl AutomationProperties.AutomationId="DetailTabs">
+                                    <TabItem Header="Properties" AutomationProperties.AutomationId="PropertiesTab">
+                                        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                            <ItemsControl ItemsSource="{Binding Properties}" Margin="8,8" AutomationProperties.AutomationId="PropertiesList">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="{x:Type local:PropertyRow}">
+                                                        <Grid Margin="0,3">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="140"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            <TextBlock Text="{Binding Name}" Style="{StaticResource MutedText}"/>
+                                                            <!-- Read-only TextBox so values can be selected and copied. -->
+                                                            <TextBox Grid.Column="1" Text="{Binding Value, Mode=OneWay}" IsReadOnly="True" IsReadOnlyCaretVisible="False"
+                                                                     BorderThickness="0" Background="Transparent" Padding="0" MinHeight="0"
+                                                                     TextWrapping="Wrap" AutomationProperties.Name="{Binding Name}">
+                                                                <TextBox.Template>
+                                                                    <ControlTemplate TargetType="TextBox">
+                                                                        <ScrollViewer x:Name="PART_ContentHost" Focusable="False"/>
+                                                                    </ControlTemplate>
+                                                                </TextBox.Template>
+                                                            </TextBox>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </ScrollViewer>
+                                    </TabItem>
+
+                                    <TabItem Header="Selector &amp; code" AutomationProperties.AutomationId="SelectorTab">
+                                        <DockPanel Margin="4,10,4,4">
+                                            <StackPanel DockPanel.Dock="Top">
+                                                <TextBlock Text="{Binding SelectorHeadline}" TextWrapping="Wrap" FontWeight="SemiBold"
+                                                           AutomationProperties.AutomationId="SelectorHeadline">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding SelectorTone}" Value="ok">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding SelectorTone}" Value="bad">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+
+                                                <ComboBox Margin="0,8,0,0" ItemsSource="{Binding SelectorChoices}" SelectedItem="{Binding SelectedChoice}"
+                                                          DisplayMemberPath="Label" ToolTip="Other verified selectors for the same element" HorizontalAlignment="Stretch"
+                                                          Visibility="{Binding HasAlternatives, Converter={StaticResource BoolToVisibility}}"
+                                                          AutomationProperties.AutomationId="SelectorChoices"/>
+
+                                                <TextBox Margin="0,8,0,0" Text="{Binding SelectorSteps, Mode=OneWay}" IsReadOnly="True"
+                                                         FontFamily="{StaticResource CodeFont}" FontSize="12" Padding="8,6"
+                                                         Background="{DynamicResource SolidBackgroundFillColorSecondaryBrush}"
+                                                         TextWrapping="Wrap" AutomationProperties.AutomationId="SelectorSteps"/>
+
+                                                <ItemsControl ItemsSource="{Binding SelectorWarnings}" Margin="0,6,0,0" AutomationProperties.AutomationId="SelectorWarnings">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <TextBlock Text="{Binding StringFormat='⚠ {0}'}" TextWrapping="Wrap" Foreground="{DynamicResource SystemFillColorCautionBrush}" Margin="0,2"/>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+
+                                                <TextBlock Text="{Binding OcclusionText}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                                           AutomationProperties.AutomationId="OcclusionText">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding OcclusionIsWarning}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+
+                                                <Border Margin="0,8,0,0" Visibility="{Binding HasWebSummary, Converter={StaticResource BoolToVisibility}}">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border" BasedOn="{StaticResource InfoBar}">
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding WebIsWarning}" Value="True">
+                                                                    <Setter Property="Background" Value="{DynamicResource SystemFillColorCautionBackgroundBrush}"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBox Text="{Binding WebSummary, Mode=OneWay}" IsReadOnly="True" TextWrapping="Wrap"
+                                                             BorderThickness="0" Background="Transparent" Padding="0" MinHeight="0"
+                                                             AutomationProperties.AutomationId="WebSummary">
+                                                        <TextBox.Template>
+                                                            <ControlTemplate TargetType="TextBox">
+                                                                <ScrollViewer x:Name="PART_ContentHost" Focusable="False"/>
+                                                            </ControlTemplate>
+                                                        </TextBox.Template>
+                                                    </TextBox>
+                                                </Border>
+
+                                                <DockPanel Margin="0,12,0,8">
+                                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="8,0,0,0" VerticalAlignment="Center"
+                                                                ToolTip="Chromium remote-debugging port for web code. Leave empty to read it from the app's command line.">
+                                                        <TextBlock Text="Debug port" Style="{StaticResource MutedText}" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                                        <TextBox Width="64" Text="{Binding CdpPortText, UpdateSourceTrigger=PropertyChanged}"
+                                                                 AutomationProperties.AutomationId="CdpPortBox" AutomationProperties.Name="Debug port"/>
+                                                    </StackPanel>
+                                                    <ComboBox ItemsSource="{Binding Snippets}" SelectedItem="{Binding SelectedSnippet}" DisplayMemberPath="Title"
+                                                              HorizontalAlignment="Stretch" AutomationProperties.AutomationId="LanguageChoice"
+                                                              AutomationProperties.Name="Code language"/>
+                                                </DockPanel>
+                                            </StackPanel>
+
+                                            <Grid>
+                                                <RichTextBox Style="{StaticResource CodeBox}" local:CodeView.Text="{Binding SelectedSnippet.Code}"
+                                                             AutomationProperties.AutomationId="CodeText" AutomationProperties.Name="Code"/>
+                                                <Button Style="{StaticResource CornerButton}" Content="Copy" Command="{Binding CopyCodeCommand}"
+                                                        AutomationProperties.AutomationId="CopyCodeButton" AutomationProperties.Name="Copy code"/>
+                                            </Grid>
+                                        </DockPanel>
+                                    </TabItem>
+                                </TabControl>
+                            </DockPanel>
+                        </Grid>
+                    </DockPanel>
+
+                    <!-- ======================================================== Record -->
+                    <DockPanel Margin="20,16,20,10" DataContext="{Binding Recorder}"
+                               Visibility="{Binding DataContext.SelectedMainTab, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource PageVisibility}, ConverterParameter=1}">
+                        <StackPanel DockPanel.Dock="Top">
+                            <TextBlock Style="{StaticResource PageTitle}" Text="Record"/>
+                            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,4,0,0" Style="{StaticResource MutedText}"
+                                       AutomationProperties.AutomationId="RecorderStatus"/>
+                            <WrapPanel Margin="0,14,0,4">
+                                <Button Command="{Binding ToggleRecordingCommand}"
+                                        AutomationProperties.AutomationId="RecordButton" AutomationProperties.Name="{Binding RecordButtonText}"
+                                        ToolTip="Start or stop recording. Works from any app: Ctrl+Shift+F8">
+                                    <Button.Style>
+                                        <Style TargetType="Button" BasedOn="{StaticResource PrimaryButton}">
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsRecording}" Value="True">
+                                                    <Setter Property="Background" Value="{DynamicResource SystemFillColorCriticalBrush}"/>
+                                                    <Setter Property="BorderBrush" Value="{DynamicResource SystemFillColorCriticalBrush}"/>
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Button.Style>
+                                    <TextBlock Text="{Binding RecordButtonText}" FontWeight="SemiBold"/>
                                 </Button>
                                 <Button Style="{StaticResource ToolButton}" Command="{Binding TogglePlayCommand}"
-                                        Content="{Binding PlayButtonText}" AutomationProperties.AutomationId="PlayButton"
-                                        ToolTip="Plays the steps back in the app, the way the FlaUI script would, and shows how each one went. Ctrl+Shift+F8 stops it."/>
+                                        AutomationProperties.AutomationId="PlayButton" AutomationProperties.Name="{Binding PlayButtonText}"
+                                        ToolTip="Plays the steps back in the app, the way the FlaUI script would, and shows how each one went. Ctrl+Shift+F8 stops it.">
+                                    <TextBlock Text="{Binding PlayButtonText}"/>
+                                </Button>
                                 <Button Style="{StaticResource ToolButton}" Command="{Binding ReportFailureCommand}"
                                         Content="Report this failure" AutomationProperties.AutomationId="ReportFailureButton"
                                         Visibility="{Binding HasFailure, Converter={StaticResource BoolToVisibility}}"
@@ -311,505 +484,590 @@
                                         Content="Delete step" AutomationProperties.AutomationId="DeleteStepButton"/>
                                 <Button Style="{StaticResource ToolButton}" Command="{Binding ClearCommand}"
                                         Content="Clear" AutomationProperties.AutomationId="ClearStepsButton"/>
-                                <CheckBox VerticalAlignment="Center" Margin="4,0,0,0" IsChecked="{Binding CaptureScreenshots}"
+                                <CheckBox Style="{StaticResource ToolCheck}" IsChecked="{Binding CaptureScreenshots}" Margin="10,0,10,6"
                                           Content="Screenshots" AutomationProperties.AutomationId="CaptureScreenshotsCheckBox"
                                           ToolTip="Takes a picture of the app's window (only that window) at each step, for the bug report"/>
                             </WrapPanel>
-                            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{StaticResource MutedBrush}"
-                                       AutomationProperties.AutomationId="RecorderStatus"/>
                         </StackPanel>
 
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="2*" MinHeight="80"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="3*" MinHeight="80"/>
-                            </Grid.RowDefinitions>
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="RecordStepsColumn" Width="5*" MinWidth="260"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition x:Name="RecordScriptColumn" Width="5*" MinWidth="320"/>
+                            </Grid.ColumnDefinitions>
 
-                            <ListBox Grid.Row="0" Margin="0,8,0,0" ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}"
-                                     BorderBrush="{StaticResource PanelBorderBrush}" HorizontalContentAlignment="Stretch"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                     AutomationProperties.AutomationId="RecordedSteps" AutomationProperties.Name="Recorded steps">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate DataType="{x:Type local:StepRow}">
-                                        <StackPanel Margin="2,3">
-                                            <TextBlock TextWrapping="Wrap">
-                                                <Run Text="{Binding Number, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=". "/><Run Text="{Binding Text, Mode=OneWay}"/>
-                                            </TextBlock>
-                                            <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0">
-                                                <TextBlock.Style>
-                                                    <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding Tone}" Value="ok">
-                                                                <Setter Property="Foreground" Value="#15803D"/>
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding Tone}" Value="warn">
-                                                                <Setter Property="Foreground" Value="#B45309"/>
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding Tone}" Value="bad">
-                                                                <Setter Property="Foreground" Value="#B91C1C"/>
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </TextBlock.Style>
-                                            </TextBlock>
-                                            <TextBlock Text="{Binding Replay}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0">
-                                                <TextBlock.Style>
-                                                    <Style TargetType="TextBlock">
-                                                        <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding Replay}" Value="">
-                                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding ReplayTone}" Value="ok">
-                                                                <Setter Property="Foreground" Value="#15803D"/>
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding ReplayTone}" Value="warn">
-                                                                <Setter Property="Foreground" Value="#B45309"/>
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding ReplayTone}" Value="bad">
-                                                                <Setter Property="Foreground" Value="#B91C1C"/>
-                                                                <Setter Property="FontWeight" Value="SemiBold"/>
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </TextBlock.Style>
-                                            </TextBlock>
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                            <Border Grid.Column="0" Style="{StaticResource Card}" Padding="4">
+                                <Grid>
+                                    <ListBox Style="{StaticResource CardList}" ItemsSource="{Binding Steps}" SelectedItem="{Binding SelectedStep}"
+                                             AutomationProperties.AutomationId="RecordedSteps" AutomationProperties.Name="Recorded steps">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type local:StepRow}">
+                                                <StackPanel Margin="2,4">
+                                                    <TextBlock TextWrapping="Wrap">
+                                                        <Run Text="{Binding Number, Mode=OneWay}" FontWeight="SemiBold"/><Run Text=". "/><Run Text="{Binding Text, Mode=OneWay}"/>
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0" Style="{StaticResource ToneText}"/>
+                                                    <TextBlock Text="{Binding Replay}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding Replay}" Value="">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding ReplayTone}" Value="ok">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorSuccessBrush}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding ReplayTone}" Value="warn">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCautionBrush}"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding ReplayTone}" Value="bad">
+                                                                        <Setter Property="Foreground" Value="{DynamicResource SystemFillColorCriticalBrush}"/>
+                                                                        <Setter Property="FontWeight" Value="SemiBold"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
 
-                            <DockPanel Grid.Row="1" Margin="0,8,0,6">
-                                <Button DockPanel.Dock="Right" Padding="10,3" Content="Save…" Command="{Binding SaveScriptCommand}"
-                                        AutomationProperties.AutomationId="SaveScriptButton" AutomationProperties.Name="Save script"/>
-                                <Button DockPanel.Dock="Right" Padding="10,3" Margin="0,0,6,0" Content="Copy script" Command="{Binding CopyScriptCommand}"
-                                        AutomationProperties.AutomationId="CopyScriptButton"/>
-                                <ComboBox ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}" DisplayMemberPath="Title"
-                                          Margin="0,0,8,0" AutomationProperties.AutomationId="ScriptLanguage" AutomationProperties.Name="Script language"/>
+                                    <StackPanel Style="{StaticResource EmptyState}"
+                                                Visibility="{Binding HasSteps, Converter={StaticResource EmptyVisibility}}"
+                                                AutomationProperties.AutomationId="RecordEmptyState">
+                                        <TextBlock Style="{StaticResource EmptyIcon}" Text="&#xE7C8;"/>
+                                        <TextBlock Style="{StaticResource EmptyTitle}" Text="No steps yet"/>
+                                        <TextBlock Style="{StaticResource EmptyText}"
+                                                   Text="Press Start recording (or Ctrl+Shift+F8 from any app), then use the app: each click and what you type becomes a step, and the script on the right writes itself."/>
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <GridSplitter Grid.Column="1" Width="12" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                            <DockPanel Grid.Column="2">
+                                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                    <Button DockPanel.Dock="Right" Style="{StaticResource ToolButton}" Margin="6,0,0,0" Content="Save…" Command="{Binding SaveScriptCommand}"
+                                            AutomationProperties.AutomationId="SaveScriptButton" AutomationProperties.Name="Save script"/>
+                                    <TextBlock Style="{StaticResource SectionTitle}" Text="Script" VerticalAlignment="Center" Margin="2,0,12,0"/>
+                                    <ComboBox ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}" DisplayMemberPath="Title" HorizontalAlignment="Stretch"
+                                              AutomationProperties.AutomationId="ScriptLanguage" AutomationProperties.Name="Script language"/>
+                                </DockPanel>
+                                <Grid>
+                                    <RichTextBox Style="{StaticResource CodeBox}" local:CodeView.Text="{Binding SelectedScript.Code}"
+                                                 AutomationProperties.AutomationId="ScriptText" AutomationProperties.Name="Recorded script"/>
+                                    <Button Style="{StaticResource CornerButton}" Content="Copy" Command="{Binding CopyScriptCommand}"
+                                            AutomationProperties.AutomationId="CopyScriptButton" AutomationProperties.Name="Copy script"/>
+                                </Grid>
                             </DockPanel>
-
-                            <TextBox Grid.Row="2" Text="{Binding SelectedScript.Code, Mode=OneWay}" IsReadOnly="True"
-                                     FontFamily="Consolas" FontSize="12" Padding="6"
-                                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                                     AutomationProperties.AutomationId="ScriptText" AutomationProperties.Name="Recorded script"/>
                         </Grid>
                     </DockPanel>
-                </TabItem>
-                </TabControl>
-            </DockPanel>
-        </Grid>
-        </TabItem>
 
-        <TabItem Header="Bug report" AutomationProperties.AutomationId="BugReportTab" DataContext="{Binding BugReport}">
-            <Grid Margin="4,6,4,4">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="370" MinWidth="300"/>
-                    <ColumnDefinition Width="6"/>
-                    <ColumnDefinition Width="*" MinWidth="300"/>
-                </Grid.ColumnDefinitions>
+                    <!-- ======================================================== Test plan -->
+                    <DockPanel x:Name="PlanPage" Margin="20,16,20,10" DataContext="{Binding Testability}"
+                               Visibility="{Binding DataContext.SelectedMainTab, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource PageVisibility}, ConverterParameter=2}">
+                        <StackPanel DockPanel.Dock="Top">
+                            <TextBlock Style="{StaticResource PageTitle}" Text="Test plan"/>
+                            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,4,0,0" Style="{StaticResource MutedText}"
+                                       AutomationProperties.AutomationId="TestabilityStatus"/>
+                            <DockPanel Margin="0,14,0,4">
+                                <WrapPanel DockPanel.Dock="Right" Visibility="{Binding HasReport, Converter={StaticResource BoolToVisibility}}">
+                                    <Button Style="{StaticResource ToolButton}" Content="Save HTML…" Command="{Binding SavePlanHtmlCommand}"
+                                            AutomationProperties.AutomationId="SavePlanHtmlButton" AutomationProperties.Name="Save test plan as HTML"
+                                            ToolTip="The whole test plan as one page, to read or share"/>
+                                    <Button Style="{StaticResource ToolButton}" Content="Save CSV…" Command="{Binding SavePlanCsvCommand}"
+                                            AutomationProperties.AutomationId="SavePlanCsvButton" AutomationProperties.Name="Save test plan as CSV"
+                                            ToolTip="One row per test case: opens in Excel, imports into TestRail, Xray, Zephyr and similar tools"/>
+                                    <Button Style="{StaticResource ToolButton}" Content="Copy as Markdown" Command="{Binding CopyPlanMarkdownCommand}"
+                                            AutomationProperties.AutomationId="CopyPlanButton" Margin="0,0,0,6"
+                                            ToolTip="Tables for a wiki or a ticket"/>
+                                </WrapPanel>
+                                <WrapPanel>
+                                    <Button Style="{StaticResource PrimaryButton}" Command="{Binding AnalyzeUnderCursorCommand}"
+                                            AutomationProperties.AutomationId="AnalyzeUnderCursorButton" AutomationProperties.Name="{Binding AnalyzeButtonText}"
+                                            ToolTip="Click, then put the cursor on the app's window within 3 seconds">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE721;" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding AnalyzeButtonText}"/>
+                                        </StackPanel>
+                                    </Button>
+                                    <Button Style="{StaticResource ToolButton}" Content="Analyze picked element's window" Command="{Binding AnalyzeSelectedCommand}"
+                                            AutomationProperties.AutomationId="AnalyzeSelectedButton"
+                                            ToolTip="The window of the element selected on the Inspect page"/>
+                                </WrapPanel>
+                            </DockPanel>
+                        </StackPanel>
 
-                <!-- What the tester writes, and what goes into the report -->
-                <DockPanel Grid.Column="0">
-                    <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0">
-                        <WrapPanel>
-                            <Button Style="{StaticResource ToolButton}" Content="Save HTML…" Command="{Binding SaveHtmlCommand}"
-                                    AutomationProperties.AutomationId="SaveHtmlButton"
-                                    ToolTip="One file with everything, screenshots included: ready to attach or e-mail"/>
-                            <Button Style="{StaticResource ToolButton}" Content="Save Markdown…" Command="{Binding SaveMarkdownCommand}"
-                                    AutomationProperties.AutomationId="SaveMarkdownButton"
-                                    ToolTip="A .md file plus a folder with the screenshots"/>
-                            <Button Style="{StaticResource ToolButton}" Content="Copy as text" Command="{Binding CopyTextCommand}"
-                                    AutomationProperties.AutomationId="CopyReportTextButton"
-                                    ToolTip="Markdown text without images, to paste into Jira, Azure DevOps or GitHub"/>
-                        </WrapPanel>
-                        <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}"
-                                   AutomationProperties.AutomationId="BugReportStatus"/>
-                    </StackPanel>
-
-                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
-                        <StackPanel>
-                            <StackPanel.Resources>
-                                <Style TargetType="TextBlock" x:Key="FieldLabel">
-                                    <Setter Property="Margin" Value="0,8,0,3"/>
-                                    <Setter Property="FontWeight" Value="SemiBold"/>
-                                </Style>
-                                <Style TargetType="CheckBox">
-                                    <Setter Property="Margin" Value="0,3"/>
-                                </Style>
-                                <Style TargetType="StackPanel" x:Key="SubOptions">
-                                    <Setter Property="Margin" Value="22,0,0,2"/>
-                                </Style>
-                            </StackPanel.Resources>
-
-                            <Border Visibility="{Binding IsFromReplay, Converter={StaticResource BoolToVisibility}}"
-                                    Background="#FEF3C7" BorderBrush="#F59E0B" BorderThickness="1" Padding="8,6" Margin="0,0,0,8">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding ReplayNote}" TextWrapping="Wrap" AutomationProperties.AutomationId="ReplayNote"/>
-                                    <Button HorizontalAlignment="Left" Margin="0,6,0,0" Padding="8,2" Content="Use all recorded steps"
-                                            Command="{Binding UseAllStepsCommand}" AutomationProperties.AutomationId="UseAllStepsButton"/>
+                        <Grid Margin="0,6,0,0">
+                            <!-- Before the first analysis -->
+                            <Border Style="{StaticResource Card}" Visibility="{Binding HasReport, Converter={StaticResource EmptyVisibility}}">
+                                <StackPanel Style="{StaticResource EmptyState}" MaxWidth="440" AutomationProperties.AutomationId="PlanEmptyState">
+                                    <TextBlock Style="{StaticResource EmptyIcon}" Text="&#xE9D5;"/>
+                                    <TextBlock Style="{StaticResource EmptyTitle}" Text="Find out what to test"/>
+                                    <TextBlock Style="{StaticResource EmptyText}"
+                                               Text="Click Analyze window under cursor and put the cursor on the app or web page within 3 seconds. You get its features (sign-in, search, forms, lists…) with test cases, the data to type, and scripts that run them. Nothing in the app is clicked."/>
+                                    <TextBlock Style="{StaticResource EmptyText}" Margin="0,8,0,0"
+                                               Text="Already picked something on the Inspect page? Analyze picked element's window uses its window."/>
                                 </StackPanel>
                             </Border>
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Title" Margin="0,0,0,3"/>
-                            <TextBox Text="{Binding Title}" AutomationProperties.AutomationId="ReportTitle" AutomationProperties.Name="Title" Padding="3"/>
 
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Severity"/>
-                            <ComboBox ItemsSource="{Binding Severities}" SelectedItem="{Binding Severity}" HorizontalAlignment="Left" MinWidth="140"
-                                      AutomationProperties.AutomationId="ReportSeverity" AutomationProperties.Name="Severity"/>
+                            <TabControl AutomationProperties.AutomationId="AnalysisTabs" Visibility="{Binding HasReport, Converter={StaticResource BoolToVisibility}}">
+                                <TabItem Header="What to test" AutomationProperties.AutomationId="TestPlanTab">
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition x:Name="PlanFeaturesColumn" Width="260" MinWidth="200"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*" MinWidth="320"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition x:Name="PlanDetailsColumn" Width="420" MinWidth="300"/>
+                                        </Grid.ColumnDefinitions>
 
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Expected result"/>
-                            <TextBox Text="{Binding Expected}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" Padding="3"
-                                     AutomationProperties.AutomationId="ReportExpected" AutomationProperties.Name="Expected result"/>
-
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Actual result"/>
-                            <TextBox Text="{Binding Actual}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48" Padding="3"
-                                     AutomationProperties.AutomationId="ReportActual" AutomationProperties.Name="Actual result"/>
-
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Notes"/>
-                            <TextBox Text="{Binding Notes}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="40" Padding="3"
-                                     AutomationProperties.AutomationId="ReportNotes" AutomationProperties.Name="Notes"/>
-
-                            <TextBlock Style="{StaticResource FieldLabel}" Text="Include in the report" Margin="0,14,0,3"/>
-                            <CheckBox Content="Steps to reproduce" IsChecked="{Binding IncludeSteps}" AutomationProperties.AutomationId="IncludeSteps"/>
-                            <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeSteps}">
-                                <CheckBox Content="Screenshots" IsChecked="{Binding IncludeScreenshots}" AutomationProperties.AutomationId="IncludeScreenshots"/>
-                                <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeScreenshots}">
-                                    <CheckBox Content="Outline the element of each step" IsChecked="{Binding HighlightElement}" AutomationProperties.AutomationId="HighlightElement"/>
-                                </StackPanel>
-                            </StackPanel>
-                            <CheckBox Content="Expected and actual result" IsChecked="{Binding IncludeExpectedActual}" AutomationProperties.AutomationId="IncludeExpectedActual"/>
-                            <CheckBox Content="Severity" IsChecked="{Binding IncludeSeverity}" AutomationProperties.AutomationId="IncludeSeverity"/>
-                            <CheckBox Content="Notes" IsChecked="{Binding IncludeNotes}" AutomationProperties.AutomationId="IncludeNotes"/>
-                            <CheckBox Content="Environment" IsChecked="{Binding IncludeEnvironment}" AutomationProperties.AutomationId="IncludeEnvironment"/>
-                            <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeEnvironment}">
-                                <CheckBox Content="Windows version" IsChecked="{Binding IncludeWindowsVersion}" AutomationProperties.AutomationId="IncludeWindowsVersion"/>
-                                <CheckBox Content="App name and version" IsChecked="{Binding IncludeAppVersion}" AutomationProperties.AutomationId="IncludeAppVersion"/>
-                                <CheckBox Content="App install path" IsChecked="{Binding IncludeAppPath}" AutomationProperties.AutomationId="IncludeAppPath"/>
-                                <CheckBox Content="Screens and scaling" IsChecked="{Binding IncludeScreens}" AutomationProperties.AutomationId="IncludeScreens"/>
-                                <CheckBox Content="Language" IsChecked="{Binding IncludeLanguage}" AutomationProperties.AutomationId="IncludeLanguage"/>
-                                <CheckBox Content="Date and time" IsChecked="{Binding IncludeDateTime}" AutomationProperties.AutomationId="IncludeDateTime"/>
-                            </StackPanel>
-                            <CheckBox Content="Element details (selectors, for developers)" IsChecked="{Binding IncludeElementDetails}" AutomationProperties.AutomationId="IncludeElementDetails"/>
-                            <CheckBox Content="Automation script that reproduces it" IsChecked="{Binding IncludeScript}" AutomationProperties.AutomationId="IncludeScript"/>
-                            <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeScript}">
-                                <ComboBox ItemsSource="{Binding ScriptLanguages}" SelectedItem="{Binding SelectedScriptLanguage}" HorizontalAlignment="Left" MinWidth="200"
-                                          AutomationProperties.AutomationId="ReportScriptLanguage" AutomationProperties.Name="Script language" Margin="0,3"/>
-                            </StackPanel>
-
-                            <StackPanel Visibility="{Binding HasScreenshots, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Style="{StaticResource FieldLabel}" Text="Screenshots per step" Margin="0,14,0,0"/>
-                                <TextBlock Text="Untick any that show something private." Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,0,0,3"/>
-                                <ItemsControl ItemsSource="{Binding StepScreenshots}" IsEnabled="{Binding IncludeScreenshots}"
-                                              AutomationProperties.AutomationId="StepScreenshots" AutomationProperties.Name="Screenshots per step">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate DataType="{x:Type local:StepScreenshotChoice}">
-                                            <CheckBox IsChecked="{Binding Include}" Margin="0,2">
-                                                <TextBlock Text="{Binding Label}" TextWrapping="Wrap"/>
-                                            </CheckBox>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
-                            </StackPanel>
-                        </StackPanel>
-                    </ScrollViewer>
-                </DockPanel>
-
-                <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
-
-                <!-- The preview shows the exact HTML that Save HTML writes -->
-                <DockPanel Grid.Column="2">
-                    <TextBlock DockPanel.Dock="Top" Margin="2,0,0,6">
-                        <Run Text="Preview" FontWeight="SemiBold"/><Run Text="  exactly what Save HTML writes" Foreground="{StaticResource MutedBrush}"/>
-                    </TextBlock>
-                    <Border BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1">
-                        <WebBrowser x:Name="PreviewBrowser" AutomationProperties.AutomationId="ReportPreview" AutomationProperties.Name="Report preview"/>
-                    </Border>
-                </DockPanel>
-            </Grid>
-        </TabItem>
-
-        <TabItem Header="Test plan" AutomationProperties.AutomationId="TestabilityTab" DataContext="{Binding Testability}">
-            <DockPanel Margin="4,6,4,4">
-                <StackPanel DockPanel.Dock="Top">
-                    <WrapPanel>
-                        <Button Style="{StaticResource ToolButton}" Content="{Binding AnalyzeButtonText}" Command="{Binding AnalyzeUnderCursorCommand}"
-                                AutomationProperties.AutomationId="AnalyzeUnderCursorButton"
-                                ToolTip="Click, then put the cursor on the app's window within 3 seconds"/>
-                        <Button Style="{StaticResource ToolButton}" Content="Analyze picked element's window" Command="{Binding AnalyzeSelectedCommand}"
-                                AutomationProperties.AutomationId="AnalyzeSelectedButton"
-                                ToolTip="The window of the element selected in the Inspector tab"/>
-                    </WrapPanel>
-                    <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,6,0,0" Foreground="{StaticResource MutedBrush}"
-                               AutomationProperties.AutomationId="TestabilityStatus"/>
-                </StackPanel>
-
-                <TabControl Margin="0,8,0,0" AutomationProperties.AutomationId="AnalysisTabs">
-                <TabItem Header="What to test" AutomationProperties.AutomationId="TestPlanTab">
-                    <Grid Margin="4,6,4,4">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="320" MinWidth="240"/>
-                            <ColumnDefinition Width="6"/>
-                            <ColumnDefinition Width="*" MinWidth="400"/>
-                        </Grid.ColumnDefinitions>
-
-                        <DockPanel Grid.Column="0">
-                            <TextBlock DockPanel.Dock="Top" Text="{Binding PlanSummary}" TextWrapping="Wrap" Margin="0,0,0,6"
-                                       AutomationProperties.AutomationId="PlanSummary"/>
-                            <WrapPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" Visibility="{Binding HasReport, Converter={StaticResource BoolToVisibility}}">
-                                <Button Style="{StaticResource ToolButton}" Content="Save HTML…" Command="{Binding SavePlanHtmlCommand}"
-                                        AutomationProperties.AutomationId="SavePlanHtmlButton" AutomationProperties.Name="Save test plan as HTML"
-                                        ToolTip="The whole test plan as one page, to read or share"/>
-                                <Button Style="{StaticResource ToolButton}" Content="Save CSV…" Command="{Binding SavePlanCsvCommand}"
-                                        AutomationProperties.AutomationId="SavePlanCsvButton" AutomationProperties.Name="Save test plan as CSV"
-                                        ToolTip="One row per test case: opens in Excel, imports into TestRail, Xray, Zephyr and similar tools"/>
-                                <Button Style="{StaticResource ToolButton}" Content="Copy as Markdown" Command="{Binding CopyPlanMarkdownCommand}"
-                                        AutomationProperties.AutomationId="CopyPlanButton"
-                                        ToolTip="Tables for a wiki or a ticket"/>
-                            </WrapPanel>
-                            <ListBox ItemsSource="{Binding Features}" SelectedItem="{Binding SelectedFeature}"
-                                     BorderBrush="{StaticResource PanelBorderBrush}" HorizontalContentAlignment="Stretch"
-                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                     AutomationProperties.AutomationId="Features" AutomationProperties.Name="Features to test">
-                                <ListBox.ItemTemplate>
-                                    <DataTemplate DataType="{x:Type local:FeatureRow}">
-                                        <StackPanel Margin="2,3">
-                                            <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/>
-                                            <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0" Foreground="{StaticResource MutedBrush}"/>
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
-                        </DockPanel>
-
-                        <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
-
-                        <Grid Grid.Column="2" Visibility="{Binding HasFeature, Converter={StaticResource BoolToVisibility}}">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="3*" MinHeight="120"/>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="*" MinHeight="90"/>
-                            </Grid.RowDefinitions>
-                            <TextBlock Grid.Row="0" Text="{Binding FeatureHeader}" FontWeight="SemiBold" FontSize="15" TextWrapping="Wrap"/>
-                            <TextBlock Grid.Row="1" Text="{Binding FeatureWarnings}" TextWrapping="Wrap" Foreground="#B45309" Margin="0,4,0,0">
-                                <TextBlock.Style>
-                                    <Style TargetType="TextBlock">
-                                        <Style.Triggers>
-                                            <DataTrigger Binding="{Binding FeatureWarnings}" Value="">
-                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                            </DataTrigger>
-                                        </Style.Triggers>
-                                    </Style>
-                                </TextBlock.Style>
-                            </TextBlock>
-                            <DockPanel Grid.Row="2" Margin="0,8,0,6">
-                                <TextBlock Text="Show" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <ComboBox ItemsSource="{Binding CaseFilters}" SelectedItem="{Binding SelectedCaseFilter}" MinWidth="170"
-                                          AutomationProperties.AutomationId="CaseFilter" AutomationProperties.Name="Show test cases"/>
-                                <TextBlock Text="{Binding CaseCountText}" VerticalAlignment="Center" Margin="10,0,0,0" Foreground="{StaticResource MutedBrush}"/>
-                            </DockPanel>
-                            <DataGrid Grid.Row="3" ItemsSource="{Binding Cases}" SelectedItem="{Binding SelectedCase}" AutoGenerateColumns="False" IsReadOnly="True"
-                                      HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="#E5E7EB"
-                                      RowDetailsVisibilityMode="VisibleWhenSelected" SelectionMode="Single" ClipboardCopyMode="None"
-                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" CanUserAddRows="False"
-                                      PreviewMouseRightButtonDown="TestCases_PreviewMouseRightButtonDown"
-                                      AutomationProperties.AutomationId="TestCases" AutomationProperties.Name="Test cases">
-                                <DataGrid.InputBindings>
-                                    <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopyValueCommand}"/>
-                                </DataGrid.InputBindings>
-                                <DataGrid.ContextMenu>
-                                    <ContextMenu>
-                                        <MenuItem Header="Copy value" Command="{Binding CopyValueCommand}" InputGestureText="Ctrl+C"/>
-                                        <MenuItem Header="Copy steps" Command="{Binding CopyStepsCommand}"/>
-                                        <MenuItem Header="Copy the whole case" Command="{Binding CopyCaseCommand}"/>
-                                    </ContextMenu>
-                                </DataGrid.ContextMenu>
-                                <DataGrid.Resources>
-                                    <Style x:Key="Wrap" TargetType="TextBlock">
-                                        <Setter Property="TextWrapping" Value="Wrap"/>
-                                        <Setter Property="Margin" Value="2,3"/>
-                                    </Style>
-                                </DataGrid.Resources>
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="Auto" ElementStyle="{StaticResource Wrap}"/>
-                                    <DataGridTextColumn Header="Test" Binding="{Binding Title}" Width="2*" ElementStyle="{StaticResource Wrap}"/>
-                                    <DataGridTextColumn Header="Kind" Binding="{Binding Kind}" Width="Auto" ElementStyle="{StaticResource Wrap}"/>
-                                    <DataGridTextColumn Header="Priority" Binding="{Binding Priority}" Width="Auto" ElementStyle="{StaticResource Wrap}"/>
-                                    <DataGridTextColumn Header="Data" Binding="{Binding Data}" Width="1.5*" FontFamily="Consolas" ElementStyle="{StaticResource Wrap}"/>
-                                    <DataGridTextColumn Header="Expected" Binding="{Binding Expected}" Width="2*" ElementStyle="{StaticResource Wrap}"/>
-                                </DataGrid.Columns>
-                                <DataGrid.RowDetailsTemplate>
-                                    <DataTemplate>
-                                        <StackPanel Margin="24,2,8,10">
-                                            <TextBlock Text="{Binding StepsText}" TextWrapping="Wrap" Foreground="#374151"/>
-                                            <StackPanel Margin="0,8,0,0" Visibility="{Binding HasData, Converter={StaticResource BoolToVisibility}}">
-                                                <TextBlock Text="{Binding DataHint}" FontSize="12" Foreground="{StaticResource MutedBrush}"/>
-                                                <DockPanel Margin="0,2,0,0">
-                                                    <Button DockPanel.Dock="Right" Padding="8,2" Margin="6,0,0,0" Content="Copy value"
-                                                            Command="{Binding DataContext.CopyValueCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
-                                                            AutomationProperties.AutomationId="CopyValueButton"/>
-                                                    <TextBox Text="{Binding ShownValue, Mode=OneWay}" IsReadOnly="True" FontFamily="Consolas" TextWrapping="Wrap"
-                                                             MaxHeight="90" VerticalScrollBarVisibility="Auto" Padding="3"
-                                                             AutomationProperties.AutomationId="CaseValue" AutomationProperties.Name="Value to type"/>
-                                                </DockPanel>
-                                            </StackPanel>
-                                            <Border Margin="0,8,0,0" Padding="8,5" Background="#FEF2F2" BorderBrush="#DC2626" BorderThickness="3,0,0,0"
-                                                    Visibility="{Binding HasRisk, Converter={StaticResource BoolToVisibility}}">
-                                                <TextBlock TextWrapping="Wrap" AutomationProperties.AutomationId="CaseRisk">
-                                                    <Run Text="If it fails: " FontWeight="SemiBold"/><Run Text="{Binding IfItFails, Mode=OneWay}"/>
-                                                </TextBlock>
+                                        <!-- Features -->
+                                        <DockPanel Grid.Column="0">
+                                            <TextBlock DockPanel.Dock="Top" Text="Features" Style="{StaticResource SectionTitle}" Margin="2,0,0,6"/>
+                                            <TextBlock DockPanel.Dock="Bottom" Text="{Binding PlanSummary}" TextWrapping="Wrap" Margin="2,8,0,0" FontSize="12"
+                                                       Style="{StaticResource MutedText}" AutomationProperties.AutomationId="PlanSummary"/>
+                                            <Border Style="{StaticResource Card}" Padding="4">
+                                                <ListBox Style="{StaticResource CardList}" ItemsSource="{Binding Features}" SelectedItem="{Binding SelectedFeature}"
+                                                         AutomationProperties.AutomationId="Features" AutomationProperties.Name="Features to test">
+                                                    <ListBox.ItemTemplate>
+                                                        <DataTemplate DataType="{x:Type local:FeatureRow}">
+                                                            <StackPanel Margin="2,4">
+                                                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                                                <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="0,2,0,0" Style="{StaticResource MutedText}"/>
+                                                            </StackPanel>
+                                                        </DataTemplate>
+                                                    </ListBox.ItemTemplate>
+                                                </ListBox>
                                             </Border>
-                                            <WrapPanel Margin="0,8,0,0">
-                                                <Button Padding="8,2" Margin="0,0,6,0" Content="Copy steps"
-                                                        Command="{Binding DataContext.CopyStepsCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
-                                                <Button Padding="8,2" Content="Copy the whole case"
-                                                        Command="{Binding DataContext.CopyCaseCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"/>
+                                        </DockPanel>
+
+                                        <GridSplitter Grid.Column="1" Width="12" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                                        <!-- Test cases -->
+                                        <DockPanel Grid.Column="2">
+                                            <StackPanel DockPanel.Dock="Top">
+                                                <TextBlock Text="{Binding FeatureHeader}" Style="{StaticResource SectionTitle}" TextWrapping="Wrap" Margin="2,0,0,6"/>
+                                                <Border Margin="0,0,0,8">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border" BasedOn="{StaticResource InfoBar}">
+                                                            <Setter Property="Background" Value="{DynamicResource SystemFillColorCautionBackgroundBrush}"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding FeatureWarnings}" Value="">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBlock Text="{Binding FeatureWarnings}" TextWrapping="Wrap"/>
+                                                </Border>
+                                                <ListBox ItemsSource="{Binding CaseFilters}" SelectedItem="{Binding SelectedCaseFilter}"
+                                                         ItemContainerStyle="{StaticResource ChipItem}" Background="Transparent" BorderThickness="0" Padding="0"
+                                                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                                         AutomationProperties.AutomationId="CaseFilter" AutomationProperties.Name="Show test cases">
+                                                    <ListBox.ItemsPanel>
+                                                        <ItemsPanelTemplate>
+                                                            <WrapPanel/>
+                                                        </ItemsPanelTemplate>
+                                                    </ListBox.ItemsPanel>
+                                                </ListBox>
+                                                <TextBlock Text="{Binding CaseCountText}" Style="{StaticResource MutedText}" FontSize="12" Margin="2,0,0,6"/>
+                                            </StackPanel>
+
+                                            <Border Style="{StaticResource Card}" Padding="2">
+                                                <DataGrid ItemsSource="{Binding Cases}" SelectedItem="{Binding SelectedCase}" AutoGenerateColumns="False" IsReadOnly="True"
+                                                          HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="{DynamicResource DividerStrokeColorDefaultBrush}"
+                                                          Background="Transparent" BorderThickness="0"
+                                                          SelectionMode="Single" ClipboardCopyMode="None"
+                                                          ScrollViewer.HorizontalScrollBarVisibility="Disabled" CanUserAddRows="False"
+                                                          PreviewMouseRightButtonDown="TestCases_PreviewMouseRightButtonDown"
+                                                          AutomationProperties.AutomationId="TestCases" AutomationProperties.Name="Test cases">
+                                                    <DataGrid.InputBindings>
+                                                        <KeyBinding Key="C" Modifiers="Control" Command="{Binding CopyValueCommand}"/>
+                                                    </DataGrid.InputBindings>
+                                                    <DataGrid.ContextMenu>
+                                                        <ContextMenu>
+                                                            <MenuItem Header="Copy value" Command="{Binding CopyValueCommand}" InputGestureText="Ctrl+C"/>
+                                                            <MenuItem Header="Copy steps" Command="{Binding CopyStepsCommand}"/>
+                                                            <MenuItem Header="Copy the whole case" Command="{Binding CopyCaseCommand}"/>
+                                                        </ContextMenu>
+                                                    </DataGrid.ContextMenu>
+                                                    <DataGrid.Resources>
+                                                        <Style x:Key="Wrap" TargetType="TextBlock">
+                                                            <Setter Property="TextWrapping" Value="Wrap"/>
+                                                            <Setter Property="Margin" Value="4,6"/>
+                                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                                        </Style>
+                                                        <Style x:Key="Trim" TargetType="TextBlock">
+                                                            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+                                                            <Setter Property="Margin" Value="4,6"/>
+                                                            <Setter Property="VerticalAlignment" Value="Center"/>
+                                                        </Style>
+                                                    </DataGrid.Resources>
+                                                    <DataGrid.Columns>
+                                                        <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="Auto" ElementStyle="{StaticResource Wrap}"/>
+                                                        <DataGridTextColumn Header="Test" Binding="{Binding Title}" Width="3*" ElementStyle="{StaticResource Wrap}"/>
+                                                        <DataGridTemplateColumn Header="Kind" Width="Auto" CellTemplate="{StaticResource KindChip}" SortMemberPath="Kind"/>
+                                                        <DataGridTemplateColumn Header="Priority" Width="Auto" CellTemplate="{StaticResource PriorityChip}" SortMemberPath="Priority"/>
+                                                        <DataGridTextColumn Header="Data" Binding="{Binding Data}" Width="1.5*" FontFamily="{StaticResource CodeFont}" FontSize="12"
+                                                                            ElementStyle="{StaticResource Trim}"/>
+                                                    </DataGrid.Columns>
+                                                </DataGrid>
+                                            </Border>
+                                        </DockPanel>
+
+                                        <GridSplitter Grid.Column="3" Width="12" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                                        <!-- The selected case, and the scripts -->
+                                        <Grid Grid.Column="4">
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="*" MinHeight="120"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="*" MinHeight="120"/>
+                                            </Grid.RowDefinitions>
+
+                                            <Border Grid.Row="0" Style="{StaticResource Card}">
+                                                <Grid>
+                                                    <StackPanel Style="{StaticResource EmptyState}" Margin="16"
+                                                                Visibility="{Binding SelectedCase, Converter={StaticResource EmptyVisibility}}">
+                                                        <TextBlock Style="{StaticResource EmptyTitle}" Text="Select a test case" Margin="0,0,0,4"/>
+                                                        <TextBlock Style="{StaticResource EmptyText}"
+                                                                   Text="Its steps, the exact data to type and what a failure means show here, with a script for that case below. Until then, the scripts cover the whole feature."/>
+                                                    </StackPanel>
+
+                                                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="16,12"
+                                                                  DataContext="{Binding SelectedCase}" AutomationProperties.AutomationId="CaseDetails">
+                                                        <ScrollViewer.Style>
+                                                            <Style TargetType="ScrollViewer">
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding}" Value="{x:Null}">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </ScrollViewer.Style>
+                                                        <StackPanel>
+                                                            <TextBlock TextWrapping="Wrap" Style="{StaticResource SectionTitle}" AutomationProperties.AutomationId="CaseTitle">
+                                                                <Run Text="{Binding Id, Mode=OneWay}" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/><Run Text="  "/><Run Text="{Binding Title, Mode=OneWay}"/>
+                                                            </TextBlock>
+                                                            <StackPanel Orientation="Horizontal" Margin="-2,6,0,0">
+                                                                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource KindChip}"/>
+                                                                <ContentPresenter Content="{Binding}" ContentTemplate="{StaticResource PriorityChip}"/>
+                                                            </StackPanel>
+
+                                                            <TextBlock Text="Steps" FontWeight="SemiBold" Margin="0,12,0,3"/>
+                                                            <TextBlock Text="{Binding StepsText}" TextWrapping="Wrap" AutomationProperties.AutomationId="CaseSteps"/>
+
+                                                            <StackPanel Margin="0,12,0,0" Visibility="{Binding HasData, Converter={StaticResource BoolToVisibility}}">
+                                                                <TextBlock Text="{Binding DataHint}" FontWeight="SemiBold" Margin="0,0,0,3"/>
+                                                                <DockPanel>
+                                                                    <Button DockPanel.Dock="Right" Margin="6,0,0,0" VerticalAlignment="Top" Content="Copy value"
+                                                                            Command="{Binding DataContext.CopyValueCommand, ElementName=PlanPage}"
+                                                                            AutomationProperties.AutomationId="CopyValueButton"/>
+                                                                    <TextBox Text="{Binding ShownValue, Mode=OneWay}" IsReadOnly="True" FontFamily="{StaticResource CodeFont}" FontSize="12" TextWrapping="Wrap"
+                                                                             MaxHeight="110" VerticalScrollBarVisibility="Auto"
+                                                                             AutomationProperties.AutomationId="CaseValue" AutomationProperties.Name="Value to type"/>
+                                                                </DockPanel>
+                                                            </StackPanel>
+
+                                                            <TextBlock Text="Expected" FontWeight="SemiBold" Margin="0,12,0,3"/>
+                                                            <TextBlock Text="{Binding Expected}" TextWrapping="Wrap" AutomationProperties.AutomationId="CaseExpected"/>
+
+                                                            <Border Margin="0,12,0,0" Padding="10,7" CornerRadius="4" BorderThickness="3,0,0,0"
+                                                                    Background="{DynamicResource SystemFillColorCriticalBackgroundBrush}" BorderBrush="{DynamicResource SystemFillColorCriticalBrush}"
+                                                                    Visibility="{Binding HasRisk, Converter={StaticResource BoolToVisibility}}">
+                                                                <TextBlock TextWrapping="Wrap" AutomationProperties.AutomationId="CaseRisk">
+                                                                    <Run Text="If it fails: " FontWeight="SemiBold"/><Run Text="{Binding IfItFails, Mode=OneWay}"/>
+                                                                </TextBlock>
+                                                            </Border>
+
+                                                            <WrapPanel Margin="0,12,0,0">
+                                                                <Button Style="{StaticResource ToolButton}" Content="Copy steps"
+                                                                        Command="{Binding DataContext.CopyStepsCommand, ElementName=PlanPage}"
+                                                                        AutomationProperties.AutomationId="CopyStepsButton"/>
+                                                                <Button Style="{StaticResource ToolButton}" Content="Copy the whole case"
+                                                                        Command="{Binding DataContext.CopyCaseCommand, ElementName=PlanPage}"
+                                                                        AutomationProperties.AutomationId="CopyCaseButton"/>
+                                                            </WrapPanel>
+                                                        </StackPanel>
+                                                    </ScrollViewer>
+                                                </Grid>
+                                            </Border>
+
+                                            <DockPanel Grid.Row="1" Margin="0,12,0,8">
+                                                <Button DockPanel.Dock="Right" Style="{StaticResource ToolButton}" Margin="6,0,0,0" Content="Save…" Command="{Binding SavePlanScriptCommand}"
+                                                        AutomationProperties.AutomationId="SavePlanScriptButton" AutomationProperties.Name="Save script"/>
+                                                <Button DockPanel.Dock="Right" Style="{StaticResource ToolButton}" Margin="6,0,0,0" Content="Whole feature" Command="{Binding ShowWholeFeatureCommand}"
+                                                        Visibility="{Binding IsCaseScript, Converter={StaticResource BoolToVisibility}}"
+                                                        AutomationProperties.AutomationId="WholeFeatureButton"
+                                                        ToolTip="Back to the scripts for every case of this feature"/>
+                                                <TextBlock DockPanel.Dock="Top" Text="{Binding ScriptsHeader}" Style="{StaticResource SectionTitle}" Margin="2,0,0,6"
+                                                           AutomationProperties.AutomationId="ScriptsHeader"
+                                                           ToolTip="Select a test case for its own script; test suites run every case with its data and check for XSS, crash text and errors"/>
+                                                <ComboBox ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}" DisplayMemberPath="Title" HorizontalAlignment="Stretch"
+                                                          AutomationProperties.AutomationId="PlanScriptLanguage" AutomationProperties.Name="Script language"/>
+                                            </DockPanel>
+
+                                            <Grid Grid.Row="2">
+                                                <RichTextBox Style="{StaticResource CodeBox}" local:CodeView.Text="{Binding ScriptText}"
+                                                             AutomationProperties.AutomationId="PlanScript" AutomationProperties.Name="Script"/>
+                                                <Button Style="{StaticResource CornerButton}" Content="Copy" Command="{Binding CopyPlanScriptCommand}"
+                                                        AutomationProperties.AutomationId="CopyPlanScriptButton" AutomationProperties.Name="Copy script"/>
+                                            </Grid>
+                                        </Grid>
+                                    </Grid>
+                                </TabItem>
+
+                                <TabItem Header="Testability" AutomationProperties.AutomationId="TestabilityDetailsTab">
+                                    <Grid Margin="0,10,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition x:Name="TestabilityListColumn" Width="420" MinWidth="300"/>
+                                            <ColumnDefinition Width="12"/>
+                                            <ColumnDefinition Width="*" MinWidth="300"/>
+                                        </Grid.ColumnDefinitions>
+
+                                        <DockPanel Grid.Column="0">
+                                            <!-- Score and "In short" -->
+                                            <Border DockPanel.Dock="Top" Style="{StaticResource Card}" Padding="16,12" Margin="0,0,0,10">
+                                                <StackPanel>
+                                                    <TextBlock Style="{StaticResource MutedText}" Text="Testability for automation" FontSize="12"/>
+                                                    <TextBlock Margin="0,2,0,0">
+                                                        <Run Text="{Binding ScoreText, Mode=OneWay}" FontSize="26" FontWeight="SemiBold"/>
+                                                        <Run Text="  "/><Run Text="{Binding CountsText, Mode=OneWay}" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                                    </TextBlock>
+                                                    <TextBlock Text="{Binding SummaryText}" TextWrapping="Wrap" Margin="0,8,0,0" AutomationProperties.AutomationId="TestabilitySummary"/>
+                                                </StackPanel>
+                                            </Border>
+
+                                            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+                                                <TextBlock Text="Show" VerticalAlignment="Center" Margin="2,0,8,0"/>
+                                                <ComboBox ItemsSource="{Binding Filters}" SelectedItem="{Binding SelectedFilter}" HorizontalAlignment="Stretch"
+                                                          AutomationProperties.AutomationId="FindingsFilter" AutomationProperties.Name="Show"/>
+                                            </DockPanel>
+
+                                            <WrapPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                                                <Button Style="{StaticResource ToolButton}" Content="Save HTML…" Command="{Binding SaveHtmlCommand}"
+                                                        AutomationProperties.AutomationId="SaveTestabilityButton" AutomationProperties.Name="Save testability report"
+                                                        ToolTip="One file with everything, the numbered screenshot included: ready to send to the developers"/>
+                                                <Button Style="{StaticResource ToolButton}" Content="Copy as text" Command="{Binding CopyTextCommand}"
+                                                        AutomationProperties.AutomationId="CopyTestabilityButton"
+                                                        ToolTip="Markdown text without the screenshot, for a ticket or a chat"/>
                                             </WrapPanel>
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </DataGrid.RowDetailsTemplate>
-                            </DataGrid>
-                            <DockPanel Grid.Row="4" Margin="0,8,0,6">
-                                <Button DockPanel.Dock="Right" Padding="10,3" Content="Save…" Command="{Binding SavePlanScriptCommand}"
-                                        AutomationProperties.AutomationId="SavePlanScriptButton" AutomationProperties.Name="Save script"/>
-                                <Button DockPanel.Dock="Right" Padding="10,3" Margin="0,0,6,0" Content="Copy script" Command="{Binding CopyPlanScriptCommand}"
-                                        AutomationProperties.AutomationId="CopyPlanScriptButton"/>
-                                <Button DockPanel.Dock="Right" Padding="10,3" Margin="0,0,6,0" Content="Whole feature" Command="{Binding ShowWholeFeatureCommand}"
-                                        Visibility="{Binding IsCaseScript, Converter={StaticResource BoolToVisibility}}"
-                                        AutomationProperties.AutomationId="WholeFeatureButton"
-                                        ToolTip="Back to the scripts for every case of this feature"/>
-                                <TextBlock Text="{Binding ScriptsHeader}" VerticalAlignment="Center" FontWeight="SemiBold" Margin="0,0,8,0"
-                                           AutomationProperties.AutomationId="ScriptsHeader"
-                                           ToolTip="Select a test case for its own script; test suites run every case with its data and check for XSS, crash text and errors"/>
-                                <ComboBox ItemsSource="{Binding Scripts}" SelectedItem="{Binding SelectedScript}" DisplayMemberPath="Title" Margin="0,0,8,0"
-                                          AutomationProperties.AutomationId="PlanScriptLanguage" AutomationProperties.Name="Script language"/>
-                            </DockPanel>
-                            <TextBox Grid.Row="5" Text="{Binding ScriptText, Mode=OneWay}" IsReadOnly="True"
-                                     FontFamily="Consolas" FontSize="12" Padding="6"
-                                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto"
-                                     AutomationProperties.AutomationId="PlanScript" AutomationProperties.Name="Script for the main flow"/>
+
+                                            <Grid>
+                                                <Grid.RowDefinitions>
+                                                    <RowDefinition Height="2*" MinHeight="100"/>
+                                                    <RowDefinition Height="Auto"/>
+                                                    <RowDefinition Height="*" MinHeight="70"/>
+                                                </Grid.RowDefinitions>
+                                                <Border Grid.Row="0" Style="{StaticResource Card}" Padding="4">
+                                                    <ListBox Style="{StaticResource CardList}" ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}"
+                                                             AutomationProperties.AutomationId="Findings" AutomationProperties.Name="Problems, grouped">
+                                                        <ListBox.ItemTemplate>
+                                                            <DataTemplate DataType="{x:Type local:GroupRow}">
+                                                                <StackPanel Margin="2,4">
+                                                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap" Style="{StaticResource ToneText}"/>
+                                                                    <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0" Style="{StaticResource MutedText}"/>
+                                                                </StackPanel>
+                                                            </DataTemplate>
+                                                        </ListBox.ItemTemplate>
+                                                    </ListBox>
+                                                </Border>
+
+                                                <TextBlock Grid.Row="1" Text="{Binding MembersHeader}" FontWeight="SemiBold" Margin="2,10,0,6"
+                                                           Visibility="{Binding HasMembers, Converter={StaticResource BoolToVisibility}}"/>
+                                                <Border Grid.Row="2" Style="{StaticResource Card}" Padding="4"
+                                                        Visibility="{Binding HasMembers, Converter={StaticResource BoolToVisibility}}">
+                                                    <ListBox Style="{StaticResource CardList}" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}"
+                                                             AutomationProperties.AutomationId="GroupMembers" AutomationProperties.Name="Controls in the group">
+                                                        <ListBox.ItemTemplate>
+                                                            <DataTemplate DataType="{x:Type local:FindingRow}">
+                                                                <StackPanel Margin="2,2">
+                                                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap"/>
+                                                                    <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,0,0,0">
+                                                                        <TextBlock.Style>
+                                                                            <Style TargetType="TextBlock" BasedOn="{StaticResource MutedText}">
+                                                                                <Style.Triggers>
+                                                                                    <DataTrigger Binding="{Binding Detail}" Value="">
+                                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                    </DataTrigger>
+                                                                                </Style.Triggers>
+                                                                            </Style>
+                                                                        </TextBlock.Style>
+                                                                    </TextBlock>
+                                                                </StackPanel>
+                                                            </DataTemplate>
+                                                        </ListBox.ItemTemplate>
+                                                    </ListBox>
+                                                </Border>
+                                            </Grid>
+                                        </DockPanel>
+
+                                        <GridSplitter Grid.Column="1" Width="12" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                                        <DockPanel Grid.Column="2">
+                                            <TextBlock DockPanel.Dock="Top" Margin="2,0,0,6">
+                                                <Run Text="Report" FontWeight="SemiBold"/><Run Text="  exactly what Save HTML writes" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                            </TextBlock>
+                                            <Border Style="{StaticResource Card}" Padding="1" CornerRadius="4">
+                                                <WebBrowser x:Name="TestabilityBrowser" AutomationProperties.AutomationId="TestabilityPreview" AutomationProperties.Name="Testability report"/>
+                                            </Border>
+                                        </DockPanel>
+                                    </Grid>
+                                </TabItem>
+                            </TabControl>
                         </Grid>
-                    </Grid>
-                </TabItem>
+                    </DockPanel>
 
-                <TabItem Header="Testability" AutomationProperties.AutomationId="TestabilityDetailsTab">
-            <Grid Margin="4,6,4,4">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="400" MinWidth="300"/>
-                    <ColumnDefinition Width="6"/>
-                    <ColumnDefinition Width="*" MinWidth="300"/>
-                </Grid.ColumnDefinitions>
-
-                <DockPanel Grid.Column="0">
-                    <StackPanel DockPanel.Dock="Top">
-                        <StackPanel Margin="0,4,0,0" Visibility="{Binding HasReport, Converter={StaticResource BoolToVisibility}}">
-                            <TextBlock>
-                                <Run Text="{Binding ScoreText, Mode=OneWay}" FontSize="24" FontWeight="Bold"/>
-                                <Run Text="  "/><Run Text="{Binding CountsText, Mode=OneWay}" Foreground="{StaticResource MutedBrush}"/>
-                            </TextBlock>
-                            <TextBlock Text="{Binding SummaryText}" TextWrapping="Wrap" Margin="0,6,0,0" AutomationProperties.AutomationId="TestabilitySummary"/>
-                            <DockPanel Margin="0,10,0,4">
-                                <TextBlock Text="Show" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <ComboBox ItemsSource="{Binding Filters}" SelectedItem="{Binding SelectedFilter}"
-                                          AutomationProperties.AutomationId="FindingsFilter" AutomationProperties.Name="Show"/>
-                            </DockPanel>
+                    <!-- ======================================================== Bug report -->
+                    <DockPanel Margin="20,16,20,10" DataContext="{Binding BugReport}"
+                               Visibility="{Binding DataContext.SelectedMainTab, RelativeSource={RelativeSource AncestorType=Window}, Converter={StaticResource PageVisibility}, ConverterParameter=3}">
+                        <StackPanel DockPanel.Dock="Top">
+                            <TextBlock Style="{StaticResource PageTitle}" Text="Bug report"/>
+                            <TextBlock Text="{Binding Status}" TextWrapping="Wrap" Margin="0,4,0,0" Style="{StaticResource MutedText}"
+                                       AutomationProperties.AutomationId="BugReportStatus"/>
+                            <WrapPanel Margin="0,14,0,4">
+                                <Button Style="{StaticResource PrimaryButton}" Content="Save HTML…" Command="{Binding SaveHtmlCommand}"
+                                        AutomationProperties.AutomationId="SaveHtmlButton"
+                                        ToolTip="One file with everything, screenshots included: ready to attach or e-mail"/>
+                                <Button Style="{StaticResource ToolButton}" Content="Save Markdown…" Command="{Binding SaveMarkdownCommand}"
+                                        AutomationProperties.AutomationId="SaveMarkdownButton"
+                                        ToolTip="A .md file plus a folder with the screenshots"/>
+                                <Button Style="{StaticResource ToolButton}" Content="Copy as text" Command="{Binding CopyTextCommand}"
+                                        AutomationProperties.AutomationId="CopyReportTextButton"
+                                        ToolTip="Markdown text without images, to paste into Jira, Azure DevOps or GitHub"/>
+                            </WrapPanel>
                         </StackPanel>
-                    </StackPanel>
 
-                    <StackPanel DockPanel.Dock="Bottom" Margin="0,8,0,0" Visibility="{Binding HasReport, Converter={StaticResource BoolToVisibility}}">
-                        <WrapPanel>
-                            <Button Style="{StaticResource ToolButton}" Content="Save HTML…" Command="{Binding SaveHtmlCommand}"
-                                    AutomationProperties.AutomationId="SaveTestabilityButton" AutomationProperties.Name="Save testability report"
-                                    ToolTip="One file with everything, the numbered screenshot included: ready to send to the developers"/>
-                            <Button Style="{StaticResource ToolButton}" Content="Copy as text" Command="{Binding CopyTextCommand}"
-                                    AutomationProperties.AutomationId="CopyTestabilityButton"
-                                    ToolTip="Markdown text without the screenshot, for a ticket or a chat"/>
-                        </WrapPanel>
-                    </StackPanel>
+                        <Grid Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition x:Name="ReportFormColumn" Width="390" MinWidth="300"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*" MinWidth="300"/>
+                            </Grid.ColumnDefinitions>
 
-                    <Grid>
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="2*" MinHeight="100"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*" MinHeight="70"/>
-                        </Grid.RowDefinitions>
-                    <ListBox Grid.Row="0" ItemsSource="{Binding Groups}" SelectedItem="{Binding SelectedGroup}"
-                             BorderBrush="{StaticResource PanelBorderBrush}" HorizontalContentAlignment="Stretch"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             AutomationProperties.AutomationId="Findings" AutomationProperties.Name="Problems, grouped">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="{x:Type local:GroupRow}">
-                                <StackPanel Margin="2,3">
-                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextWrapping="Wrap">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Tone}" Value="ok">
-                                                        <Setter Property="Foreground" Value="#15803D"/>
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Tone}" Value="warn">
-                                                        <Setter Property="Foreground" Value="#B45309"/>
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding Tone}" Value="bad">
-                                                        <Setter Property="Foreground" Value="#B91C1C"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
+                            <!-- What the tester writes, and what goes into the report -->
+                            <Border Grid.Column="0" Style="{StaticResource Card}">
+                                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="16,12">
+                                    <StackPanel>
+                                        <StackPanel.Resources>
+                                            <Style TargetType="TextBlock" x:Key="FieldLabel">
+                                                <Setter Property="Margin" Value="0,12,0,4"/>
+                                                <Setter Property="FontWeight" Value="SemiBold"/>
                                             </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                    <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,1,0,0" Foreground="{StaticResource MutedBrush}"/>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-
-                    <TextBlock Grid.Row="1" Text="{Binding MembersHeader}" FontWeight="SemiBold" Margin="0,8,0,4"
-                               Visibility="{Binding HasMembers, Converter={StaticResource BoolToVisibility}}"/>
-                    <ListBox Grid.Row="2" ItemsSource="{Binding Members}" SelectedItem="{Binding SelectedMember}"
-                             Visibility="{Binding HasMembers, Converter={StaticResource BoolToVisibility}}"
-                             BorderBrush="{StaticResource PanelBorderBrush}" HorizontalContentAlignment="Stretch"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                             AutomationProperties.AutomationId="GroupMembers" AutomationProperties.Name="Controls in the group">
-                        <ListBox.ItemTemplate>
-                            <DataTemplate DataType="{x:Type local:FindingRow}">
-                                <StackPanel Margin="2,2">
-                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap"/>
-                                    <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" FontSize="12" Margin="14,0,0,0" Foreground="{StaticResource MutedBrush}">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding Detail}" Value="">
-                                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
+                                            <Style TargetType="CheckBox" BasedOn="{StaticResource {x:Type CheckBox}}">
+                                                <Setter Property="Margin" Value="0,1"/>
+                                                <Setter Property="MinHeight" Value="28"/>
                                             </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </StackPanel>
-                            </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
-                    </Grid>
-                </DockPanel>
+                                            <Style TargetType="StackPanel" x:Key="SubOptions">
+                                                <Setter Property="Margin" Value="26,0,0,2"/>
+                                            </Style>
+                                        </StackPanel.Resources>
 
-                <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent"/>
+                                        <Border Visibility="{Binding IsFromReplay, Converter={StaticResource BoolToVisibility}}" Margin="0,0,0,8"
+                                                Style="{StaticResource InfoBar}" Background="{DynamicResource SystemFillColorCautionBackgroundBrush}">
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding ReplayNote}" TextWrapping="Wrap" AutomationProperties.AutomationId="ReplayNote"/>
+                                                <Button HorizontalAlignment="Left" Margin="0,8,0,0" Content="Use all recorded steps"
+                                                        Command="{Binding UseAllStepsCommand}" AutomationProperties.AutomationId="UseAllStepsButton"/>
+                                            </StackPanel>
+                                        </Border>
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Title" Margin="0,0,0,4"/>
+                                        <TextBox Text="{Binding Title}" AutomationProperties.AutomationId="ReportTitle" AutomationProperties.Name="Title"/>
 
-                <DockPanel Grid.Column="2">
-                    <TextBlock DockPanel.Dock="Top" Margin="2,0,0,6">
-                        <Run Text="Report" FontWeight="SemiBold"/><Run Text="  exactly what Save HTML writes" Foreground="{StaticResource MutedBrush}"/>
-                    </TextBlock>
-                    <Border BorderBrush="{StaticResource PanelBorderBrush}" BorderThickness="1">
-                        <WebBrowser x:Name="TestabilityBrowser" AutomationProperties.AutomationId="TestabilityPreview" AutomationProperties.Name="Testability report"/>
-                    </Border>
-                </DockPanel>
-            </Grid>
-                </TabItem>
-                </TabControl>
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Severity"/>
+                                        <ComboBox ItemsSource="{Binding Severities}" SelectedItem="{Binding Severity}" HorizontalAlignment="Left" MinWidth="160"
+                                                  AutomationProperties.AutomationId="ReportSeverity" AutomationProperties.Name="Severity"/>
+
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Expected result"/>
+                                        <TextBox Text="{Binding Expected}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="56"
+                                                 AutomationProperties.AutomationId="ReportExpected" AutomationProperties.Name="Expected result"/>
+
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Actual result"/>
+                                        <TextBox Text="{Binding Actual}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="56"
+                                                 AutomationProperties.AutomationId="ReportActual" AutomationProperties.Name="Actual result"/>
+
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Notes"/>
+                                        <TextBox Text="{Binding Notes}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="48"
+                                                 AutomationProperties.AutomationId="ReportNotes" AutomationProperties.Name="Notes"/>
+
+                                        <TextBlock Style="{StaticResource FieldLabel}" Text="Include in the report" Margin="0,18,0,4"/>
+                                        <CheckBox Content="Steps to reproduce" IsChecked="{Binding IncludeSteps}" AutomationProperties.AutomationId="IncludeSteps"/>
+                                        <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeSteps}">
+                                            <CheckBox Content="Screenshots" IsChecked="{Binding IncludeScreenshots}" AutomationProperties.AutomationId="IncludeScreenshots"/>
+                                            <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeScreenshots}">
+                                                <CheckBox Content="Outline the element of each step" IsChecked="{Binding HighlightElement}" AutomationProperties.AutomationId="HighlightElement"/>
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <CheckBox Content="Expected and actual result" IsChecked="{Binding IncludeExpectedActual}" AutomationProperties.AutomationId="IncludeExpectedActual"/>
+                                        <CheckBox Content="Severity" IsChecked="{Binding IncludeSeverity}" AutomationProperties.AutomationId="IncludeSeverity"/>
+                                        <CheckBox Content="Notes" IsChecked="{Binding IncludeNotes}" AutomationProperties.AutomationId="IncludeNotes"/>
+                                        <CheckBox Content="Environment" IsChecked="{Binding IncludeEnvironment}" AutomationProperties.AutomationId="IncludeEnvironment"/>
+                                        <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeEnvironment}">
+                                            <CheckBox Content="Windows version" IsChecked="{Binding IncludeWindowsVersion}" AutomationProperties.AutomationId="IncludeWindowsVersion"/>
+                                            <CheckBox Content="App name and version" IsChecked="{Binding IncludeAppVersion}" AutomationProperties.AutomationId="IncludeAppVersion"/>
+                                            <CheckBox Content="App install path" IsChecked="{Binding IncludeAppPath}" AutomationProperties.AutomationId="IncludeAppPath"/>
+                                            <CheckBox Content="Screens and scaling" IsChecked="{Binding IncludeScreens}" AutomationProperties.AutomationId="IncludeScreens"/>
+                                            <CheckBox Content="Language" IsChecked="{Binding IncludeLanguage}" AutomationProperties.AutomationId="IncludeLanguage"/>
+                                            <CheckBox Content="Date and time" IsChecked="{Binding IncludeDateTime}" AutomationProperties.AutomationId="IncludeDateTime"/>
+                                        </StackPanel>
+                                        <CheckBox Content="Element details (selectors, for developers)" IsChecked="{Binding IncludeElementDetails}" AutomationProperties.AutomationId="IncludeElementDetails"/>
+                                        <CheckBox Content="Automation script that reproduces it" IsChecked="{Binding IncludeScript}" AutomationProperties.AutomationId="IncludeScript"/>
+                                        <StackPanel Style="{StaticResource SubOptions}" IsEnabled="{Binding IncludeScript}">
+                                            <ComboBox ItemsSource="{Binding ScriptLanguages}" SelectedItem="{Binding SelectedScriptLanguage}" HorizontalAlignment="Left" MinWidth="220"
+                                                      AutomationProperties.AutomationId="ReportScriptLanguage" AutomationProperties.Name="Script language" Margin="0,4"/>
+                                        </StackPanel>
+
+                                        <StackPanel Visibility="{Binding HasScreenshots, Converter={StaticResource BoolToVisibility}}">
+                                            <TextBlock Style="{StaticResource FieldLabel}" Text="Screenshots per step" Margin="0,18,0,0"/>
+                                            <TextBlock Text="Untick any that show something private." Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,0,0,4"/>
+                                            <ItemsControl ItemsSource="{Binding StepScreenshots}" IsEnabled="{Binding IncludeScreenshots}"
+                                                          AutomationProperties.AutomationId="StepScreenshots" AutomationProperties.Name="Screenshots per step">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate DataType="{x:Type local:StepScreenshotChoice}">
+                                                        <CheckBox IsChecked="{Binding Include}" Margin="0,2">
+                                                            <TextBlock Text="{Binding Label}" TextWrapping="Wrap"/>
+                                                        </CheckBox>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </StackPanel>
+                                </ScrollViewer>
+                            </Border>
+
+                            <GridSplitter Grid.Column="1" Width="12" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                            <!-- The preview shows the exact HTML that Save HTML writes -->
+                            <DockPanel Grid.Column="2">
+                                <TextBlock DockPanel.Dock="Top" Margin="2,0,0,6">
+                                    <Run Text="Preview" FontWeight="SemiBold"/><Run Text="  exactly what Save HTML writes" Foreground="{DynamicResource TextFillColorSecondaryBrush}"/>
+                                </TextBlock>
+                                <Border Style="{StaticResource Card}" Padding="1" CornerRadius="4">
+                                    <WebBrowser x:Name="PreviewBrowser" AutomationProperties.AutomationId="ReportPreview" AutomationProperties.Name="Report preview"/>
+                                </Border>
+                            </DockPanel>
+                        </Grid>
+                    </DockPanel>
+                </Grid>
             </DockPanel>
-        </TabItem>
-        </TabControl>
-    </DockPanel>
+        </Border>
+
+        <!-- "Copied" and similar notices, above the status bar. -->
+        <Popup x:Name="ToastPopup" PlacementTarget="{Binding ElementName=StatusBar}" Placement="Center" VerticalOffset="-46"
+               AllowsTransparency="True" IsHitTestVisible="False" Focusable="False">
+            <Border x:Name="ToastCard" CornerRadius="16" Padding="16,7" Margin="10"
+                    Background="{DynamicResource SolidBackgroundFillColorTertiaryBrush}" BorderBrush="{DynamicResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <Border.Effect>
+                    <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.25"/>
+                </Border.Effect>
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock FontFamily="{StaticResource IconFont}" Text="&#xE73E;" Foreground="{DynamicResource SystemFillColorSuccessBrush}" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                    <TextBlock x:Name="ToastText" Text="Copied" AutomationProperties.AutomationId="ToastText"/>
+                </StackPanel>
+            </Border>
+        </Popup>
+    </Grid>
 </Window>

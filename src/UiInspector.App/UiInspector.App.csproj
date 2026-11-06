@@ -10,6 +10,8 @@
     <RootNamespace>UiInspector.App</RootNamespace>
     <!-- Per-monitor DPI v2: cursor, UIA rectangles and overlay placement all use physical pixels. -->
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- ThemeMode (the Fluent theme) is marked experimental. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>

@@ -54,9 +54,9 @@ public sealed partial class MainViewModel : ObservableObject
         };
     }
 
-    private const int BugReportTabIndex = 1;
+    private const int BugReportTabIndex = 3;
 
-    /// <summary>The top-level tab: 0 Inspector, 1 Bug report, 2 Test plan.</summary>
+    /// <summary>The page in the rail: 0 Inspect, 1 Record, 2 Test plan, 3 Bug report.</summary>
     [ObservableProperty]
     private int _selectedMainTab;
 
@@ -140,6 +140,9 @@ public sealed partial class MainViewModel : ObservableObject
     private SelectorResult? _selectorResult;
     private CancellationTokenSource? _selectorCts;
     private string _preferredSnippetId = "flaui";
+
+    /// <summary>The code language last chosen (remembered between runs).</summary>
+    public string PreferredSnippetId { get => _preferredSnippetId; set => _preferredSnippetId = value; }
 
     public ObservableCollection<SelectorChoice> SelectorChoices { get; } = [];
 
@@ -576,6 +579,7 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             Clipboard.SetText(snippet.Code);
+            Toast.Show("Copied");
             Status = $"Copied the {snippet.Title} code to the clipboard.";
         }
         catch (System.Runtime.InteropServices.COMException)
@@ -654,6 +658,7 @@ public sealed partial class MainViewModel : ObservableObject
         try
         {
             Clipboard.SetText(Format.Report(node.Info, PathFromRoot(node)));
+            Toast.Show("Copied");
             Status = $"Copied details of {Format.Describe(node.Info)} to the clipboard.";
         }
         catch (System.Runtime.InteropServices.COMException)
