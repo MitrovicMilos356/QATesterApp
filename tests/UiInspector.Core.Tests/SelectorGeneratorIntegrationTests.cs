@@ -188,6 +188,34 @@ public class SelectorGeneratorIntegrationTests(SelectorFixtureWindow fixture) : 
         Assert.Contains("containing \"Confirm delete?\"", best.Strategy);
     }
 
+    // Regression (Discord's "View profile"): an unnamed menu item deep inside a popout that is one
+    // of hundreds of unnamed groups. Live, that's too much to search; in a snapshot the popout is
+    // found by its text and the item by its place in it, not by its place in the whole window.
+    [Fact]
+    public void UnnamedItemDeepInAPopout_IsCountedInsideThePopout_WhenCheckedAgainstASnapshot()
+    {
+        var window = Window;
+        var title = window.FindFirstDescendant(_automation.ConditionFactory.ByName("Profile menu"))!;
+        var menu = _automation.TreeWalkerFactory.GetControlViewWalker().GetParent(title);
+        var item = menu.FindAllDescendants(_automation.ConditionFactory.ByControlType(ControlType.Button))[1];
+
+        var inspection = _inspector.InspectElement(_automation, item)!;
+        var path = inspection.Ancestors.Reverse().Append(inspection.Element).ToList();
+        var generator = new SelectorGenerator(_inspector);
+
+        var live = generator.Generate(_automation, path).Best!;
+        Assert.DoesNotContain("Profile menu", live.Strategy);
+
+        var watch = Stopwatch.StartNew();
+        var best = generator.Generate(_automation, path, TreeSnapshot.Capture(_automation, path)!).Best!;
+        Assert.True(watch.ElapsedMilliseconds < 3000, $"took {watch.ElapsedMilliseconds} ms");
+        Assert.Contains("#2 inside Group containing \"Profile menu\"", best.Strategy);
+        Assert.Equal("Profile menu", best.Steps[0].Has?.Get(SelectorProperty.Name)?.Value);
+        Assert.Equal(1, best.Steps[^1].Index);
+        Assert.Contains(best.Warnings, w => w.Contains("position 2 of 3 matches inside the Group"));
+        Assert.True(best.Score > live.Score, $"{best.Score} vs {live.Score}");
+    }
+
     [Fact]
     public void Snapshot_CopiesTheWholeWindowQuickly()
     {

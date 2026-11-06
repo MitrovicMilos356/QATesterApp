@@ -95,5 +95,29 @@ $popupOk.Add_Click({ $status.Text = 'Confirmed'; $popup.Visible = $false })
 $popup.Controls.AddRange(@($question, $popupOk))
 $showPopup.Add_Click({ $popup.Visible = $true })
 
-$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes, $remember, $password, $passwordInfo, $ordersList, $showPopup, $otherOk, $popup))
+# Like Discord's profile popout: a menu among 120 look-alike groups, its unnamed buttons nested
+# deep inside it. Only the menu's text and the button's place in it tell the button apart.
+# (Below the visible area; it's only inspected, never clicked.)
+$lookAlikes = foreach ($i in 0..119) {
+    $g = New-Object System.Windows.Forms.GroupBox
+    $g.Location = New-Object System.Drawing.Point((($i % 60) * 8), (620 + [math]::Floor($i / 60) * 8)); $g.Size = New-Object System.Drawing.Size(6, 6)
+    $g
+}
+$profileMenu = New-Object System.Windows.Forms.GroupBox
+$profileMenu.Text = ' ' # with no text, UI Automation would borrow a nearby label's text as its name
+$profileMenu.Location = New-Object System.Drawing.Point(10, 650); $profileMenu.Size = New-Object System.Drawing.Size(400, 120)
+$menuTitle = New-Object System.Windows.Forms.Label
+$menuTitle.Text = 'Profile menu'; $menuTitle.Location = New-Object System.Drawing.Point(5, 15); $menuTitle.AutoSize = $true
+$menuItems = $profileMenu
+foreach ($depth in 1..5) {
+    $wrapper = New-Object System.Windows.Forms.Panel
+    $wrapper.Location = New-Object System.Drawing.Point(2, $(if ($depth -eq 1) { 40 } else { 2 })); $wrapper.Size = New-Object System.Drawing.Size((390 - $depth * 4), (70 - $depth * 4))
+    $menuItems.Controls.Add($wrapper)
+    $menuItems = $wrapper
+}
+foreach ($i in 0..2) { $menuItems.Controls.Add((New-Button '' '' (5 + $i * 100) 5)) }
+$profileMenu.Controls.Add($menuTitle)
+
+$form.Controls.AddRange(@($save, $orders, $customers, $tools, $status, $notes, $remember, $password, $passwordInfo, $ordersList, $showPopup, $otherOk, $popup, $profileMenu))
+$form.Controls.AddRange([System.Windows.Forms.Control[]]$lookAlikes)
 [System.Windows.Forms.Application]::Run($form)

@@ -50,7 +50,10 @@ Selecting any element generates a selector and **checks it against the live app*
    unique (e.g. *Button "Delete" inside Pane #ordersPanel*).
 3. If no ancestor is unique by itself: the nearest one told apart by **text it contains**, the
    way a person would (*Button "Delete" inside the Pane containing "Order 1042"*). This survives
-   rows being added, removed or reordered; it does tie the test to that data.
+   rows being added, removed or reordered; it does tie the test to that data. If even inside that
+   container only a position tells the element apart (unnamed items of a popup menu), it uses the
+   position there: *Button #2 inside the Group containing "Edit Profile"* only breaks if that
+   menu changes, not when anything else in the window does.
 4. Last resort, when nothing at all tells look-alikes apart: its position among the matches,
    clearly marked as fragile. The fix then is an AutomationId from the developers (WPF
    `AutomationProperties.AutomationId`, WinForms `Name`, web `data-testid`).
@@ -282,6 +285,7 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 | Web code without a debug port | Locators built from the accessibility tree for the 8 web fixture cases (including an unnamed clickable tile), with each script opening its own (headless) Edge: Playwright JS/Python/C# 24/24, Selenium Python 7/8. The miss is the Shadow DOM button: Selenium's XPath can't look inside Shadow DOM, and without a port the inspector can't tell it's there (Playwright handles it). A recorded web workflow (fill, delete order 1042, check): 4/4. Scripts that start the app with a port themselves, with a stand-in Electron launcher: 4/4; with "the app" already running without a port, the script stops after 4 s with the "quit it completely" message. The 24 debug-port cases still pass |
 | Bug report | A report built from the recorded 6-step workflow, rendered in Edge: every screenshot shows the window as it was at that step (typed text, password dots, check box before and after). Each option checked by tests to add or remove its part. In the GUI, driven through UI Automation: title and severity reach the preview, unticking a part removes it, the preview folder is deleted on exit |
 | Clicks that close their popup | A popup with an OK button that closes it, next to another OK: checked against the snapshot taken at the click, its selector is "OK inside the Pane containing *Confirm delete?*", verified. Checked live after the click, the two can't be told apart |
+| Unnamed items in a popout | Like Discord's "View profile": an unnamed button, 6 levels deep in a menu that is one of 121 unnamed groups. Checked against a click snapshot: "Button #2 inside the Group containing *Profile menu*". Checked live (where the search stays near the element), it falls back to its position in the whole window |
 | Discord (real app, no setup) | A recorded 4-step Playwright script started Discord with a debug port through `Update.exe` and attached. Steps 1–2 ran; step 3 relied on a text that only appears while hovering, which led to the click snapshot above |
 | Recorded scripts (Appium) | Generated and unit-tested, **not run** (no Appium server) |
 | Recorder with real mouse and keyboard | **Not run here**: the hook was installed and removed in a test, but recording real input would have captured the person using this computer. Try it on your apps |
@@ -315,5 +319,6 @@ Quit any running `uiinspect` first (`Ctrl+C`). Windows locks the files of a runn
 - **Chromium's document element carries the page URL** as its UI Automation value, which is how scripts know where to go without a debug port.
 - **On web pages, "the div containing this text" isn't specific enough**: every outer wrapper `<div>` contains it too. The locator starts from the element showing exactly that text and goes up to its nearest container (`ancestor::div[1]`).
 - **Chromium can leave plain `<div>`s out of the UIA tree**, so the UIA parent of a label isn't necessarily its row.
+- **Discord's popouts sit among 600+ unnamed groups**, and their items are several wrappers deep. Live searches only look 4 levels up and give up past 100 look-alikes (each check is a UIA round trip); a click snapshot is searched in memory, so it looks at every container. A nameless WinForms GroupBox borrows a nearby label's text as its name, which the fixture avoids with a blank title.
 - **The .NET Framework UI Automation client (`System.Windows.Automation`) doesn't see WinForms AutomationIds**, unlike UIA3 (FlaUI, uiautomation). Tools built on it see a different tree.
 - Mixed-DPI monitors haven't been tested yet (the development machine has one 100 % monitor).

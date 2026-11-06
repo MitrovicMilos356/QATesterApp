@@ -255,7 +255,15 @@ public sealed class TreeSnapshot : IElementTree
     private static IEnumerable<Node> FindAll(Node scope, SelectorStep step, TreeScope treeScope)
     {
         var candidates = treeScope == TreeScope.Children ? scope.Children : Below(scope);
-        return candidates.Where(n => Matches(n, step) && (step.Has is null || FindAll(n, step.Has, TreeScope.Descendants).Any()));
+        if (step.Has is null) return candidates.Where(n => Matches(n, step));
+
+        // Everything with a match somewhere below it, found in one pass instead of a search under each candidate.
+        var containing = new HashSet<Node>();
+        foreach (var match in FindAll(scope, step.Has, TreeScope.Descendants))
+        {
+            for (var p = match.Parent; p is not null && p != scope && containing.Add(p); p = p.Parent) { }
+        }
+        return candidates.Where(n => containing.Contains(n) && Matches(n, step));
     }
 
     public List<TreeElement>? Descendants(ElementInfo scope, int max)

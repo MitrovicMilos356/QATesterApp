@@ -19,11 +19,16 @@ public sealed class SelectorGenerator(ElementInspector inspector)
     private const int ScopePenalty = 5;
     private const int IndexPenalty = 45;
     private const int MaxParentWalk = 40;
+    // Searching the live UI is slow, so content anchors only look near the target there. A snapshot
+    // is searched in memory, so it can afford whole apps: Discord's popups sit among 600+ unnamed groups.
     private const int MaxContentAnchorDepth = 4;
     private const int MaxLookAlikeContainers = 100;
     private const int MaxLandmarkScan = 300;
+    private const int MaxSnapshotLookAlikeContainers = 5000;
+    private const int MaxSnapshotLandmarkScan = 3000;
     private const int MaxLandmarksTried = 12;
     private const int ContentAnchorPenalty = 15;
+    private const int AnchoredIndexPenalty = 25;
 
     internal const string LanguageWarning = "Names follow the app's UI language; this part breaks if the app runs in another language.";
 
@@ -256,35 +261,54 @@ public sealed class SelectorGenerator(ElementInspector inspector)
         var selectors = new List<Selector>();
         var target = path[^1];
         var scope = path[scopeIndex];
-        var lowest = Math.Max(scopeIndex + 1, path.Count - 1 - MaxContentAnchorDepth);
+        var snapshot = tree is TreeSnapshot;
+        var lowest = snapshot ? scopeIndex + 1 : Math.Max(scopeIndex + 1, path.Count - 1 - MaxContentAnchorDepth);
+        var maxLookAlikes = snapshot ? MaxSnapshotLookAlikeContainers : MaxLookAlikeContainers;
+        // A position inside the nearest anchored container (the third item of the popup that says
+        // "Edit Profile") still beats a position in the whole window, but only if nothing exact turns up.
+        Selector? indexed = null;
 
         for (var i = path.Count - 2; i >= lowest; i--)
         {
             var container = path[i];
             if (string.IsNullOrEmpty(container.ControlType)) continue;
             var containerStep = ContainerStep(container);
-            if (tree.FindAll(scope, containerStep, TreeScope.Descendants).Count > MaxLookAlikeContainers) continue;
+            if (tree.FindAll(scope, containerStep, TreeScope.Descendants).Count > maxLookAlikes) continue;
 
-            foreach (var landmark in Landmarks(tree, container, target))
+            foreach (var landmark in Landmarks(tree, container, target, snapshot ? MaxSnapshotLandmarkScan : MaxLandmarkScan))
             {
                 var anchorStep = containerStep with { Has = landmark.Step };
                 if (Verify(tree.FindAll(scope, anchorStep, TreeScope.Descendants), container).Status != VerificationStatus.Unique) continue;
 
+                IReadOnlyList<SelectorStep> Steps(SelectorStep targetStep) =>
+                    scopeAnchor is { } a ? [a.Step, anchorStep, targetStep] : [anchorStep, targetStep];
+                var where = $"{container.ControlType} containing \"{landmark.Text}\"" + (scopeAnchor is { } s ? $" inside {Describe(s.Step)}" : "");
+                var warnings = scopeAnchor?.Warnings.Append(landmark.Warning) ?? [landmark.Warning];
+
                 foreach (var candidate in targetCandidates)
                 {
-                    var verification = Verify(tree.FindAll(container, candidate.Step, TreeScope.Descendants), target);
-                    if (verification.Status != VerificationStatus.Unique) continue;
+                    var matches = tree.FindAll(container, candidate.Step, TreeScope.Descendants);
+                    var verification = Verify(matches, target);
+                    if (verification.Status == VerificationStatus.Unique)
+                    {
+                        selectors.Add(make(Steps(candidate.Step), $"{candidate.Strategy} inside {where}",
+                            Math.Min(candidate.Score, landmark.Score) - ContentAnchorPenalty,
+                            candidate.Warnings.Concat(warnings), verification));
+                        continue;
+                    }
 
-                    IReadOnlyList<SelectorStep> steps = scopeAnchor is { } a ? [a.Step, anchorStep, candidate.Step] : [anchorStep, candidate.Step];
-                    var where = $"{container.ControlType} containing \"{landmark.Text}\"" + (scopeAnchor is { } s ? $" inside {Describe(s.Step)}" : "");
-                    selectors.Add(make(steps, $"{candidate.Strategy} inside {where}",
-                        Math.Min(candidate.Score, landmark.Score) - ContentAnchorPenalty,
-                        candidate.Warnings.Concat(scopeAnchor?.Warnings ?? []).Append(landmark.Warning),
-                        verification));
+                    var index = matches.FindIndex(m => SameRuntimeId(m, target));
+                    if (indexed is not null || index < 0) continue;
+                    indexed = make(Steps(candidate.Step with { Index = index }), $"{candidate.Strategy} #{index + 1} inside {where}",
+                        Math.Min(candidate.Score, landmark.Score) - ContentAnchorPenalty - AnchoredIndexPenalty,
+                        candidate.Warnings.Concat(warnings)
+                            .Append($"Uses position {index + 1} of {matches.Count} matches inside the {container.ControlType} containing \"{landmark.Text}\"; it breaks if items are added, removed or reordered there."),
+                        new SelectorVerification(VerificationStatus.Unique, 1));
                 }
                 if (selectors.Count > 0) return selectors;
             }
         }
+        if (indexed is not null) selectors.Add(indexed);
         return selectors;
     }
 
@@ -302,9 +326,9 @@ public sealed class SelectorGenerator(ElementInspector inspector)
     /// Texts inside <paramref name="container"/> that might tell it apart from look-alikes: labels
     /// first, other named elements next. The target's own name is skipped (every look-alike has it).
     /// </summary>
-    private static IEnumerable<Landmark> Landmarks(IElementTree tree, ElementInfo container, ElementInfo target)
+    private static IEnumerable<Landmark> Landmarks(IElementTree tree, ElementInfo container, ElementInfo target, int maxScan)
     {
-        var descendants = tree.Descendants(container, MaxLandmarkScan);
+        var descendants = tree.Descendants(container, maxScan);
         if (descendants is null) yield break;
         var named = descendants
             .Where(d => !d.RuntimeId.AsSpan().SequenceEqual(target.RuntimeId.ToArray()))
